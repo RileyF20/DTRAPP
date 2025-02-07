@@ -11,8 +11,9 @@ name_mapping = {
     4: "David", 5: "Emma", 6: "Fiona", 7: "George", 9: "Henry"
 }
 
-# Global variable to check if history window is open
+# Global variables
 history_window_open = False
+history_window = None  # Ensure global reference to history window
 
 # Create or connect to the database
 def create_database():
@@ -40,9 +41,11 @@ def save_to_database(filename, output_path):
 
 # Retrieve and display conversion history with search functionality
 def show_history():
-    global history_window_open
+    global history_window, history_window_open
+
     if not history_window_open:
         history_window_open = True  # Mark history window as open
+
         def filter_history():
             search_query = search_entry.get().lower()
             for item in tree.get_children():
@@ -87,9 +90,11 @@ def show_history():
 
 # Close history window and reset global flag
 def close_history_window():
-    global history_window_open
+    global history_window, history_window_open
+    if history_window:
+        history_window.destroy()
+        history_window = None  # Reset history window reference
     history_window_open = False
-    history_window.destroy()
 
 # Convert multiple .dat files to Excel
 def convert_batch_to_excel(files):
