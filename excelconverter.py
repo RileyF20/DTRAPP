@@ -39,6 +39,63 @@ def save_to_database(filename, output_path):
     conn.commit()
     conn.close()
 
+# Function to filter in/out entries (ensures only first and last entry per day per employee)
+def filter_in_out_entries(df):
+    if df.shape[1] < 2:
+        return df  # Return original if insufficient columns
+
+    first_col = df.columns[0]  # Employee ID column
+    time_col = df.columns[1]  # Timestamp column
+
+    # Ensure the time column is in datetime format
+    df[time_col] = pd.to_datetime(df[time_col])
+
+    # Extract the date for grouping
+    df['Date'] = df[time_col].dt.date
+
+    # Find the first and last occurrence per employee per day
+    first_occurrence = df.groupby([first_col, 'Date'])[time_col].idxmin()
+    last_occurrence = df.groupby([first_col, 'Date'])[time_col].idxmax()
+
+    # Combine both occurrences and restore original order based on date
+    unique_indices = sorted(set(first_occurrence) | set(last_occurrence), key=lambda x: df.loc[x, time_col])
+    filtered_df = df.loc[unique_indices].reset_index(drop=True)
+
+    return filtered_df.drop(columns=['Date'])  # Remove temporary Date column
+
+
+# Convert multiple .dat files to Excel with custom save location and filename
+def convert_batch_to_excel(files):
+    for dat_file in files:
+        try:
+            df = pd.read_csv(dat_file, delimiter="\t")
+
+            if df.shape[1] > 0:
+                first_column_name = df.columns[0]
+                df[first_column_name] = df[first_column_name].map(name_mapping).fillna(df[first_column_name])
+
+                # Apply filter to keep only first and last entry per employee per day
+                df = filter_in_out_entries(df)
+
+            # Ask user for save location and custom filename
+            save_path = filedialog.asksaveasfilename(
+                defaultextension=".xlsx",
+                filetypes=[("Excel Files", "*.xlsx")],
+                initialfile=os.path.basename(dat_file).replace(".dat", ".xlsx"),
+                title="Save Converted Excel File"
+            )
+
+            if save_path:  # Proceed only if the user selected a path
+                df.to_excel(save_path, index=False, engine='openpyxl')
+                save_to_database(os.path.basename(dat_file), save_path)
+            else:
+                messagebox.showwarning("Warning", "File saving canceled.")
+
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to convert {os.path.basename(dat_file)}: {e}")
+    
+    messagebox.showinfo("Success", "Batch conversion completed!")
+
 # Retrieve and display conversion history with search functionality
 def show_history():
     global history_window, history_window_open
@@ -63,7 +120,7 @@ def show_history():
         history_window.title("Conversion History")
         history_window.geometry("550x350")
         history_window.configure(bg="#f5f5f5")
-        
+
         search_frame = tk.Frame(history_window, bg="#f5f5f5")
         search_frame.pack(pady=5)
         search_label = tk.Label(search_frame, text="Search:", bg="#f5f5f5")
@@ -72,7 +129,7 @@ def show_history():
         search_entry.pack(side=tk.LEFT, padx=5)
         search_button = tk.Button(search_frame, text="Filter", command=filter_history)
         search_button.pack(side=tk.LEFT, padx=5)
-        
+
         tree = ttk.Treeview(history_window, columns=("Filename", "Date", "Output Path"), show="headings")
         tree.heading("Filename", text="Filename")
         tree.heading("Date", text="Date Converted")
@@ -96,21 +153,6 @@ def close_history_window():
         history_window = None  # Reset history window reference
     history_window_open = False
 
-# Convert multiple .dat files to Excel
-def convert_batch_to_excel(files):
-    for dat_file in files:
-        try:
-            df = pd.read_csv(dat_file, delimiter="\t")
-            if df.shape[1] > 0:
-                first_column_name = df.columns[0]
-                df[first_column_name] = df[first_column_name].map(name_mapping).fillna(df[first_column_name])
-            excel_file = os.path.splitext(dat_file)[0] + '.xlsx'
-            df.to_excel(excel_file, index=False, engine='openpyxl')
-            save_to_database(os.path.basename(dat_file), excel_file)
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to convert {os.path.basename(dat_file)}: {e}")
-    messagebox.showinfo("Success", "Batch conversion completed!")
-
 # Browse multiple .dat files
 def browse_files():
     files = filedialog.askopenfilenames(filetypes=[("Data Files", "*.dat")])
@@ -125,24 +167,24 @@ def create_gui():
     root.geometry("400x350")  # You can adjust the initial size
     root.configure(bg="#f5f5f5")
     root.resizable(True, True)  # Enable resizing (minimize and maximize)
-    
+
     try:
         root.iconbitmap("edplogo.ico")  
     except:
         print("Icon not found, using default")
-    
+
     label = tk.Label(root, text="Convert DAT to Excel", font=("Segoe UI", 18, "bold"), bg="#f5f5f5", fg="#333")
     label.pack(pady=20)
-    
+
     frame = tk.Frame(root, bg="#f5f5f5")
     frame.pack(pady=10)
-    
+
     button = tk.Button(frame, text="Select .dat Files", command=browse_files, font=("Segoe UI", 12, "bold"), fg="white", bg="#4CAF50", relief="flat", bd=0, padx=20, pady=10, highlightthickness=0)
     button.grid(row=0, column=0)
-    
+
     history_button = tk.Button(frame, text="View History", command=show_history, font=("Segoe UI", 12, "bold"), fg="white", bg="#2196F3", relief="flat", bd=0, padx=20, pady=10, highlightthickness=0)
     history_button.grid(row=1, column=0, pady=10)
-    
+
     root.mainloop()
 
 if __name__ == "__main__":
