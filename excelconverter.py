@@ -48,46 +48,86 @@ def filter_in_out_entries(df):
     df[time_col] = pd.to_datetime(df[time_col])
     df['Date'] = df[time_col].dt.date
 
-    first_occurrence = df.groupby([first_col, 'Date'])[time_col].idxmin()
-    last_occurrence = df.groupby([first_col, 'Date'])[time_col].idxmax()
+    # Get the first time in and the last time out for each employee per day
+    first_occurrence = df.groupby([first_col, 'Date'])[time_col].idxmin()  # First time in
+    last_occurrence = df.groupby([first_col, 'Date'])[time_col].idxmax()   # Last time out
 
+    # Combine the indices of the first time-in and last time-out (no duplicates)
     unique_indices = sorted(set(first_occurrence) | set(last_occurrence), key=lambda x: df.loc[x, time_col])
     filtered_df = df.loc[unique_indices].reset_index(drop=True)
-    
-    return filtered_df.drop(columns=['Date'])  # Remove temporary column
+
+    # Remove duplicates based on employee ID and Date (keep only one row per day per employee)
+    filtered_df = filtered_df.drop_duplicates(subset=[first_col, 'Date'])
+
+    # Add 'FirstTimeIn' and 'LastTimeOut' columns
+    filtered_df['FirstTimeIn'] = filtered_df.groupby([first_col, 'Date'])[time_col].transform('first')
+
+    # Explicitly find the last time-out for that day (based on the latest log entry)
+    last_time = df.groupby([first_col, 'Date'])[time_col].max().reset_index()
+    last_time.columns = ['Name', 'Date', 'LastTimeOut']  # Rename the columns for merging
+    filtered_df = pd.merge(filtered_df, last_time, on=['Name', 'Date'], how='left')
+
+    # If there's only one entry (no time-out), set it to 'no out'
+    filtered_df['LastTimeOut'] = filtered_df.apply(
+        lambda row: row['LastTimeOut'] if row['FirstTimeIn'] != row['LastTimeOut'] else 'no out', axis=1
+    )
+
+    # Only keep relevant columns: 'Name', 'Date', 'FirstTimeIn', 'LastTimeOut'
+    final_df = filtered_df[[first_col, 'Date', 'FirstTimeIn', 'LastTimeOut']]
+    final_df.columns = ["Name", "Date", "Time In", "Time Out"]  # Rename columns for final output
+
+    return final_df
+
 
 def convert_batch_to_excel(files):
     for dat_file in files:
         try:
-            df = pd.read_csv(dat_file, delimiter="\t")
+            df = pd.read_csv(dat_file, delimiter="\t", header=None)
             
-            if df.shape[1] > 0:
-                first_column_name = df.columns[0]
-                df[first_column_name] = df[first_column_name].map(name_mapping).fillna(df[first_column_name])
-                df = filter_in_out_entries(df)
+            if df.empty:
+                messagebox.showerror("Error", f"The file {dat_file} is empty.")
+                return
+
+            if df.shape[1] < 2:
+                messagebox.showerror("Error", "DAT file must have at least two columns (ID and Timestamp).")
+                return
+
+            df.columns = ["Name", "Timestamp"] + [f"Col_{i}" for i in range(2, df.shape[1])]
+            df["Name"] = df["Name"].map(name_mapping).fillna(df["Name"].astype(str))
+
+            # Remove the format specification, let pandas infer the format
+            df["Timestamp"] = pd.to_datetime(df["Timestamp"], errors="coerce")
             
+            # Drop rows with invalid timestamps (NaT values)
+            df = df.dropna(subset=["Timestamp"])
+
+            if df.empty:
+                messagebox.showerror("Error", "No valid timestamps found in the DAT file.")
+                return
+
+            # Filter for first time-in and last time-out, with no duplicated entries
+            final_df = filter_in_out_entries(df)
+
+            if final_df.empty:
+                messagebox.showerror("Error", "No data available for conversion. Check the input file.")
+                return
+
+            # Save the filtered data to Excel
             save_path = filedialog.asksaveasfilename(
                 defaultextension=".xlsx",
                 filetypes=[("Excel Files", "*.xlsx")],
                 initialfile=os.path.basename(dat_file).replace(".dat", ".xlsx"),
                 title="Save Converted Excel File"
             )
-            
+
             if save_path:
-                df.to_excel(save_path, index=False, engine='openpyxl')
-                save_to_database(os.path.basename(dat_file), save_path)
-                
-                # Remove file from the listbox after conversion
-                for i in range(listbox_files.size()):
-                    if listbox_files.get(i) == dat_file:
-                        listbox_files.delete(i)
-                        break
-                
-                # Ask if user wants to open the file
+                with pd.ExcelWriter(save_path, engine="openpyxl") as writer:
+                    final_df.to_excel(writer, sheet_name="Attendance", index=False)
+
                 open_file = messagebox.askyesno("Conversion Complete", "File converted successfully!\nDo you want to open it now?")
                 if open_file:
                     subprocess.run(["start", "", save_path], shell=True)
-        
+
         except Exception as e:
             messagebox.showerror("Error", f"Failed to convert {os.path.basename(dat_file)}: {e}")
 
