@@ -140,9 +140,50 @@ def close_history_window():
     history_window_open = False
 
 def browse_files():
-    files = filedialog.askopenfilenames(filetypes=[("Data Files", "*.dat")])
-    if files:
-        convert_batch_to_excel(files)
+    file_path = filedialog.askopenfilename(filetypes=[("Data Files", "*.dat")])
+    if not file_path:
+        return
+
+    try:
+        df = pd.read_csv(file_path, delimiter="\t", dtype=str)  # Ensure all columns are read properly
+
+        preview_window = tk.Toplevel(root)
+        preview_window.title(f"Preview: {os.path.basename(file_path)}")
+        preview_window.geometry("800x500")
+
+        frame = tk.Frame(preview_window)
+        frame.pack(expand=True, fill="both", padx=10, pady=10)
+
+        tree = ttk.Treeview(frame, show="headings")
+
+        # Set up columns
+        tree["columns"] = list(df.columns)
+        for col in df.columns:
+            tree.heading(col, text=col)
+            tree.column(col, anchor="center", width=max(df[col].astype(str).str.len().max() * 8, 100))  # Auto adjust width
+
+        # Insert rows
+        for _, row in df.iterrows():
+            tree.insert("", "end", values=list(row))
+
+        # Add scrollbar
+        scrollbar_x = ttk.Scrollbar(frame, orient="horizontal", command=tree.xview)
+        scrollbar_y = ttk.Scrollbar(frame, orient="vertical", command=tree.yview)
+        tree.configure(xscrollcommand=scrollbar_x.set, yscrollcommand=scrollbar_y.set)
+
+        scrollbar_x.pack(side="bottom", fill="x")
+        scrollbar_y.pack(side="right", fill="y")
+        tree.pack(expand=True, fill="both")
+
+        def proceed_to_conversion():
+            preview_window.destroy()
+            convert_batch_to_excel([file_path])
+
+        proceed_button = tk.Button(preview_window, text="Convert", command=proceed_to_conversion, font=("Segoe UI", 12, "bold"), fg="white", bg="#4CAF50", relief="flat", padx=10, pady=5)
+        proceed_button.pack(pady=10)
+
+    except Exception as e:
+        messagebox.showerror("Error", f"Failed to load file: {e}")
 
 def create_gui():
     global root
