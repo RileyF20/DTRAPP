@@ -77,13 +77,20 @@ def convert_batch_to_excel(files):
                 df.to_excel(save_path, index=False, engine='openpyxl')
                 save_to_database(os.path.basename(dat_file), save_path)
                 
+                # Remove file from the listbox after conversion
+                for i in range(listbox_files.size()):
+                    if listbox_files.get(i) == dat_file:
+                        listbox_files.delete(i)
+                        break
+                
                 # Ask if user wants to open the file
                 open_file = messagebox.askyesno("Conversion Complete", "File converted successfully!\nDo you want to open it now?")
                 if open_file:
                     subprocess.run(["start", "", save_path], shell=True)
-
+        
         except Exception as e:
             messagebox.showerror("Error", f"Failed to convert {os.path.basename(dat_file)}: {e}")
+
 
 def show_history():
     global history_window, history_window_open
@@ -144,8 +151,17 @@ def browse_files():
     if not file_path:
         return
 
+    listbox_files.insert(tk.END, file_path)  # Add filename to the listbox
+
+def preview_selected_file(event):
+    selected_index = listbox_files.curselection()
+    if not selected_index:
+        return
+
+    file_path = listbox_files.get(selected_index[0])
+
     try:
-        df = pd.read_csv(file_path, delimiter="\t", dtype=str)  # Ensure all columns are read properly
+        df = pd.read_csv(file_path, delimiter="\t", dtype=str)  # Read data file
 
         preview_window = tk.Toplevel(root)
         preview_window.title(f"Preview: {os.path.basename(file_path)}")
@@ -186,27 +202,47 @@ def browse_files():
         messagebox.showerror("Error", f"Failed to load file: {e}")
 
 def create_gui():
-    global root
+    global root, listbox_files
     root = tk.Tk()
     root.title("DAT to Excel Converter")
-    root.geometry("400x350")
+    root.geometry("500x400")
     root.configure(bg="#f5f5f5")
     root.resizable(True, True)
-    
+
     label = tk.Label(root, text="Convert DAT to Excel", font=("Segoe UI", 18, "bold"), bg="#f5f5f5", fg="#333")
     label.pack(pady=20)
 
     frame = tk.Frame(root, bg="#f5f5f5")
     frame.pack(pady=10)
 
-    button = tk.Button(frame, text="Select .dat Files", command=browse_files, font=("Segoe UI", 12, "bold"), fg="white", bg="#4CAF50", relief="flat", padx=20, pady=10)
-    button.grid(row=0, column=0)
+    button = tk.Button(frame, text="Select .dat Files", command=browse_files, font=("Segoe UI", 12, "bold"), 
+                       fg="white", bg="#4CAF50", relief="flat", padx=20, pady=10, cursor="hand2")
+    button.grid(row=0, column=0, padx=5)
 
-    history_button = tk.Button(frame, text="View History", command=show_history, font=("Segoe UI", 12, "bold"), fg="white", bg="#2196F3", relief="flat", padx=20, pady=10)
-    history_button.grid(row=1, column=0, pady=10)
+    history_button = tk.Button(frame, text="View History", command=show_history, font=("Segoe UI", 12, "bold"), 
+                               fg="white", bg="#2196F3", relief="flat", padx=20, pady=10, cursor="hand2")
+    history_button.grid(row=0, column=1, padx=5)
+
+    # Frame for Listbox and Scrollbar
+    listbox_frame = tk.Frame(root, bg="#f5f5f5")
+    listbox_frame.pack(padx=10, pady=10, fill="both", expand=True)
+
+    # Scrollbar for the Listbox
+    scrollbar = tk.Scrollbar(listbox_frame, orient="vertical")
+
+    # Listbox with better UI styling
+    listbox_files = tk.Listbox(listbox_frame, height=8, font=("Segoe UI", 12), 
+                               selectbackground="#D3D3D3", relief="solid", bd=1, 
+                               highlightthickness=1, highlightcolor="#4CAF50", yscrollcommand=scrollbar.set)
+    listbox_files.pack(side="left", fill="both", expand=True)
+
+    scrollbar.config(command=listbox_files.yview)
+    scrollbar.pack(side="right", fill="y")
+
+    # Bind double-click event to open preview
+    listbox_files.bind("<Double-Button-1>", preview_selected_file)
 
     root.mainloop()
 
 if __name__ == "__main__":
-    create_database()
     create_gui()
