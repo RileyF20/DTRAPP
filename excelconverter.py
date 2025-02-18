@@ -4,7 +4,9 @@ import pandas as pd
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 from datetime import datetime
+from openpyxl.styles import Alignment, Font
 import subprocess
+import openpyxl
 
 # Name mapping dictionary
 name_mapping = {
@@ -45,45 +47,40 @@ def filter_in_out_entries(df):
     first_col = df.columns[0]  # Employee ID column
     time_col = df.columns[1]  # Timestamp column
 
+    # Convert timestamp to datetime
     df[time_col] = pd.to_datetime(df[time_col])
-    df['Date'] = df[time_col].dt.date
+    
+    # Extract date and time
+    df['Date'] = df[time_col].dt.strftime('%Y-%m-%d')  # Extract date
+    df['Time'] = df[time_col].dt.strftime('%H:%M:%S')  # Extract time only
 
-    # Get the first time in and the last time out for each employee per day
-    first_occurrence = df.groupby([first_col, 'Date'])[time_col].idxmin()  # First time in
-    last_occurrence = df.groupby([first_col, 'Date'])[time_col].idxmax()   # Last time out
+    # Get first time in and last time out for each employee per day
+    grouped = df.groupby([first_col, 'Date'])['Time'].agg(['first', 'last']).reset_index()
+    grouped.columns = ['Name', 'Date', 'Time In', 'Time Out']
 
-    # Combine the indices of the first time-in and last time-out (no duplicates)
-    unique_indices = sorted(set(first_occurrence) | set(last_occurrence), key=lambda x: df.loc[x, time_col])
-    filtered_df = df.loc[unique_indices].reset_index(drop=True)
+    # If only one log exists, mark 'Time Out' as "no out"
+    grouped['Time Out'] = grouped.apply(lambda row: row['Time Out'] if row['Time In'] != row['Time Out'] else 'no out', axis=1)
 
-    # Remove duplicates based on employee ID and Date (keep only one row per day per employee)
-    filtered_df = filtered_df.drop_duplicates(subset=[first_col, 'Date'])
+    # Pivot the table to make dates the column headers
+    pivot_df = grouped.pivot(index="Name", columns="Date", values=["Time In", "Time Out"])
 
-    # Add 'FirstTimeIn' and 'LastTimeOut' columns
-    filtered_df['FirstTimeIn'] = filtered_df.groupby([first_col, 'Date'])[time_col].transform('first')
+    # Flatten MultiIndex columns and make the 'Time In' and 'Time Out' columns side by side for each date
+    pivot_df.columns = [f"{col[1]} {col[0]}" for col in pivot_df.columns]
 
-    # Explicitly find the last time-out for that day (based on the latest log entry)
-    last_time = df.groupby([first_col, 'Date'])[time_col].max().reset_index()
-    last_time.columns = ['Name', 'Date', 'LastTimeOut']  # Rename the columns for merging
-    filtered_df = pd.merge(filtered_df, last_time, on=['Name', 'Date'], how='left')
+    # Reset index to make 'Name' a column again
+    pivot_df = pivot_df.reset_index()
 
-    # If there's only one entry (no time-out), set it to 'no out'
-    filtered_df['LastTimeOut'] = filtered_df.apply(
-        lambda row: row['LastTimeOut'] if row['FirstTimeIn'] != row['LastTimeOut'] else 'no out', axis=1
-    )
+    return pivot_df
 
-    # Only keep relevant columns: 'Name', 'Date', 'FirstTimeIn', 'LastTimeOut'
-    final_df = filtered_df[[first_col, 'Date', 'FirstTimeIn', 'LastTimeOut']]
-    final_df.columns = ["Name", "Date", "Time In", "Time Out"]  # Rename columns for final output
 
-    return final_df
 
+import openpyxl
 
 def convert_batch_to_excel(files):
     for dat_file in files:
         try:
             df = pd.read_csv(dat_file, delimiter="\t", header=None)
-            
+
             if df.empty:
                 messagebox.showerror("Error", f"The file {dat_file} is empty.")
                 return
@@ -95,24 +92,21 @@ def convert_batch_to_excel(files):
             df.columns = ["Name", "Timestamp"] + [f"Col_{i}" for i in range(2, df.shape[1])]
             df["Name"] = df["Name"].map(name_mapping).fillna(df["Name"].astype(str))
 
-            # Remove the format specification, let pandas infer the format
             df["Timestamp"] = pd.to_datetime(df["Timestamp"], errors="coerce")
-            
-            # Drop rows with invalid timestamps (NaT values)
-            df = df.dropna(subset=["Timestamp"])
+            df = df.dropna(subset=["Timestamp"])  # Remove invalid timestamps
 
             if df.empty:
                 messagebox.showerror("Error", "No valid timestamps found in the DAT file.")
                 return
 
-            # Filter for first time-in and last time-out, with no duplicated entries
+            # Filter for first time-in and last time-out
             final_df = filter_in_out_entries(df)
 
             if final_df.empty:
                 messagebox.showerror("Error", "No data available for conversion. Check the input file.")
                 return
 
-            # Save the filtered data to Excel
+            # Get save path from user
             save_path = filedialog.asksaveasfilename(
                 defaultextension=".xlsx",
                 filetypes=[("Excel Files", "*.xlsx")],
@@ -122,7 +116,15 @@ def convert_batch_to_excel(files):
 
             if save_path:
                 with pd.ExcelWriter(save_path, engine="openpyxl") as writer:
+                    # Write the consolidated attendance sheet
                     final_df.to_excel(writer, sheet_name="Attendance", index=False)
+
+                    # Generate individual employee DTR sheets
+                    for name in df["Name"].unique():
+                        generate_employee_dtr(writer, df, name)
+
+                # Auto-adjust column widths
+                auto_adjust_column_widths(save_path)
 
                 open_file = messagebox.askyesno("Conversion Complete", "File converted successfully!\nDo you want to open it now?")
                 if open_file:
@@ -130,6 +132,82 @@ def convert_batch_to_excel(files):
 
         except Exception as e:
             messagebox.showerror("Error", f"Failed to convert {os.path.basename(dat_file)}: {e}")
+
+def generate_employee_dtr(writer, df, employee_name):
+    """Generates a formatted Daily Time Record (DTR) sheet for an employee."""
+    employee_df = df[df["Name"] == employee_name].copy()
+    employee_df["Date"] = employee_df["Timestamp"].dt.date
+    employee_df["Time"] = employee_df["Timestamp"].dt.strftime('%H:%M:%S')
+
+    # Group by Date to get first and last times (AM Arrival, PM Departure)
+    grouped = employee_df.groupby("Date")["Time"].agg(["first", "last"]).reset_index()
+    grouped.columns = ["Date", "AM Arrival", "PM Departure"]
+
+    # Generate full month dates for missing records
+    first_date = grouped["Date"].min()
+    last_date = grouped["Date"].max()
+    all_dates = pd.date_range(first_date, last_date, freq='D').date
+    dtr_df = pd.DataFrame({"Date": all_dates})
+
+    # Merge with recorded time logs
+    dtr_df = dtr_df.merge(grouped, on="Date", how="left")
+
+    # Extract day number and weekday names
+    dtr_df["Day"] = dtr_df["Date"].apply(lambda x: x.day)
+    dtr_df["Weekday"] = dtr_df["Date"].apply(lambda x: x.strftime('%A'))
+
+    # Fill in "Sunday" and "Holiday" labels
+    dtr_df["AM Arrival"].fillna(dtr_df["Weekday"].apply(lambda x: "Sunday" if x == "Sunday" else ""), inplace=True)
+    dtr_df["PM Departure"].fillna(dtr_df["Weekday"].apply(lambda x: "Sunday" if x == "Sunday" else ""), inplace=True)
+
+    # Reorder columns for DTR format
+    dtr_df = dtr_df[["Day", "Weekday", "AM Arrival", "PM Departure"]]
+
+    # Write to Excel with formatting
+    dtr_df.to_excel(writer, sheet_name=employee_name, index=False, startrow=4)
+
+    # Apply DTR formatting in Excel
+    wb = writer.book
+    ws = wb[employee_name]
+
+    # Add title and headers
+    ws["A1"] = "DAILY TIME RECORD"
+    ws["A2"] = f"Employee: {employee_name}"
+    ws["A1"].font = Font(size=14, bold=True)
+    ws["A2"].font = Font(size=12, italic=True)
+
+    # Adjust column widths
+    for col in ws.columns:
+        max_length = 0
+        col_letter = col[0].column_letter
+        for cell in col:
+            try:
+                if cell.value:
+                    max_length = max(max_length, len(str(cell.value)))
+            except:
+                pass
+        ws.column_dimensions[col_letter].width = max_length + 2
+
+def auto_adjust_column_widths(file_path):
+    """Auto-adjusts column widths in an Excel file to remove the `###` issue."""
+    wb = openpyxl.load_workbook(file_path)
+    ws = wb.active
+
+    for col in ws.columns:
+        max_length = 0
+        col_letter = col[0].column_letter  # Get column letter
+
+        for cell in col:
+            try:
+                if cell.value:
+                    max_length = max(max_length, len(str(cell.value)))
+            except:
+                pass
+
+        adjusted_width = max_length + 2  # Add extra space for visibility
+        ws.column_dimensions[col_letter].width = adjusted_width
+
+    wb.save(file_path)
 
 
 def show_history():
