@@ -12,8 +12,38 @@ import openpyxl
 
 # Name mapping dictionary
 name_mapping = {
-    0: "Norman", 8: "Kian", 1: "Alice", 2: "Bob", 3: "Charlie",
-    4: "David", 5: "Emma", 6: "Fiona", 7: "George", 9: "Henry"
+    1: "PALILEO, FORTUNATO L.",
+    2: "QUILANTANG, ALLAN C.",
+    3: "BONDOC, FREDERICK B.",
+    4: "TAMAYO, ROBERT G.",
+    5: "ALFONSO, ROSAMIE Y.",
+    6: "DE LEON, ESPERANZA M.",
+    7: "MANIQUIS, MA. ANGELINA B.",
+    8: "JACINTO, FERNANDO JR. N.",
+    9: "ILETO, ELIZABETH C.",
+    11: "PEÑA, JOHN RONWALDO C.",
+    12: "DEPANO, ELSON JR. T.",
+    13: "OMBAO, RODEL A.",
+    14: "VELINA, TIBOY JR. M.",
+    15: "SUBIDO, MARIETTA E.",
+    16: "CABANDING, TERESITA C.",
+    17: "GURION, CHRISTOPHER T.",
+    18: "PASCUA, NERISSA D.",
+    21: "PAZ, CHARMAINE T.",
+    22: "BUCAYU, NORMA F.",
+    23: "GUNGON, JAMES CHRISTIAN N.",
+    24: "ESTEVES, ALLAN M.",
+    25: "POMAREJOS, KATHLEEN C.",
+    27: "GOPEZ, RICHARD M.",
+    29: "REYES, JOSE GLENN G.",
+    30: "CRUZ, ARIEL C.",
+    32: "ALMERO, BEVERLY O.",
+    36: "ALZAGA, EMY F.",
+    37: "RAYOS, FERNANDO G.",
+    38: "BARING, ROBERT I.",
+    39: "RIESGO, RECHELLE N.",
+    40: "BERNALDO, MA. THERESA C.",
+    60: "DOMINGO, KIM EDWARD B."
 }
 
 # Global variables
@@ -160,6 +190,11 @@ def generate_employee_dtr(writer, df, employee_name):
     grouped = employee_df.groupby("Date")["Time"].agg(["first", "last"]).reset_index()
     grouped.columns = ["Date", "AM Arrival", "PM Departure"]
 
+    # Mark "No Out" if there's only one timestamp
+    grouped["PM Departure"] = grouped.apply(
+        lambda row: row["PM Departure"] if row["AM Arrival"] != row["PM Departure"] else "No Out", axis=1
+    )
+
     # Generate full month dates for missing records
     first_date = grouped["Date"].min()
     last_date = grouped["Date"].max()
@@ -194,7 +229,7 @@ def generate_employee_dtr(writer, df, employee_name):
     ws["A2"].font = Font(size=12, italic=True)
 
     # Description section below the DTR
-    month_year = first_date.strftime("%B %d-%d %Y")  # For example: "January 1-31 2025"
+    month_year = first_date.strftime("%B %d-%d %Y")  # Example: "January 1-31 2025"
     ws["A3"] = f"For the month of: {month_year}"
     ws["A4"] = "Official hours for arrival and departure: "
     ws["A5"] = "Regular days: 8:00 AM - 5:00 PM"
