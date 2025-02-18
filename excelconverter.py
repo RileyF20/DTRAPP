@@ -5,6 +5,8 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 from datetime import datetime
 from openpyxl.styles import Alignment, Font
+from openpyxl.utils import get_column_letter
+from openpyxl import load_workbook
 import subprocess
 import openpyxl
 
@@ -99,6 +101,11 @@ def convert_batch_to_excel(files):
                 messagebox.showerror("Error", "No valid timestamps found in the DAT file.")
                 return
 
+            # Extract the month and year for sheet naming and headers
+            first_date = df["Timestamp"].min()
+            month_year = first_date.strftime("%B %Y")  # Example: "January 2025"
+            sheet_name = f"DTR - {month_year}"
+
             # Filter for first time-in and last time-out
             final_df = filter_in_out_entries(df)
 
@@ -116,8 +123,14 @@ def convert_batch_to_excel(files):
 
             if save_path:
                 with pd.ExcelWriter(save_path, engine="openpyxl") as writer:
-                    # Write the consolidated attendance sheet
-                    final_df.to_excel(writer, sheet_name="Attendance", index=False)
+                    # Write the attendance sheet with a month-based name
+                    final_df.to_excel(writer, sheet_name=sheet_name, index=False, startrow=2)
+
+                    # Auto-adjust column widths
+                    writer.book[sheet_name]["A1"] = month_year  # Set month-year as title
+                    writer.book[sheet_name]["A1"].font = Font(size=14, bold=True)
+                    writer.book[sheet_name]["A1"].alignment = Alignment(horizontal="center")
+                    writer.book[sheet_name].merge_cells('A1:E1')  # Merge across columns for better visibility
 
                     # Generate individual employee DTR sheets
                     for name in df["Name"].unique():
@@ -130,8 +143,12 @@ def convert_batch_to_excel(files):
                 if open_file:
                     subprocess.run(["start", "", save_path], shell=True)
 
+                # Remove the .dat file from the listbox after successful conversion
+                listbox_files.delete(listbox_files.get(0, tk.END).index(dat_file))  # Remove the file from the listbox
+
         except Exception as e:
             messagebox.showerror("Error", f"Failed to convert {os.path.basename(dat_file)}: {e}")
+
 
 def generate_employee_dtr(writer, df, employee_name):
     """Generates a formatted Daily Time Record (DTR) sheet for an employee."""
@@ -160,7 +177,7 @@ def generate_employee_dtr(writer, df, employee_name):
     dtr_df["AM Arrival"].fillna(dtr_df["Weekday"].apply(lambda x: "Sunday" if x == "Sunday" else ""), inplace=True)
     dtr_df["PM Departure"].fillna(dtr_df["Weekday"].apply(lambda x: "Sunday" if x == "Sunday" else ""), inplace=True)
 
-    # Reorder columns for DTR format
+    # Reorder columns for DTR format and add Weekday, AM Arrival, PM Departure
     dtr_df = dtr_df[["Day", "Weekday", "AM Arrival", "PM Departure"]]
 
     # Write to Excel with formatting
@@ -176,6 +193,18 @@ def generate_employee_dtr(writer, df, employee_name):
     ws["A1"].font = Font(size=14, bold=True)
     ws["A2"].font = Font(size=12, italic=True)
 
+    # Description section below the DTR
+    month_year = first_date.strftime("%B %d-%d %Y")  # For example: "January 1-31 2025"
+    ws["A3"] = f"For the month of: {month_year}"
+    ws["A4"] = "Official hours for arrival and departure: "
+    ws["A5"] = "Regular days: 8:00 AM - 5:00 PM"
+    ws["A6"] = "Saturdays: "
+
+    # Format description cells
+    for row in range(3, 7):
+        ws[f"A{row}"].font = Font(size=10, italic=True)
+        ws[f"A{row}"].alignment = Alignment(horizontal="left")
+
     # Adjust column widths
     for col in ws.columns:
         max_length = 0
@@ -188,27 +217,31 @@ def generate_employee_dtr(writer, df, employee_name):
                 pass
         ws.column_dimensions[col_letter].width = max_length + 2
 
+
+from openpyxl.utils import get_column_letter
+from openpyxl import load_workbook
+
 def auto_adjust_column_widths(file_path):
-    """Auto-adjusts column widths in an Excel file to remove the `###` issue."""
-    wb = openpyxl.load_workbook(file_path)
-    ws = wb.active
+    wb = load_workbook(file_path)
+    
+    for sheet in wb.sheetnames:
+        ws = wb[sheet]
+        column_widths = {}
 
-    for col in ws.columns:
-        max_length = 0
-        col_letter = col[0].column_letter  # Get column letter
-
-        for cell in col:
-            try:
+        for row in ws.iter_rows():
+            for cell in row:
                 if cell.value:
-                    max_length = max(max_length, len(str(cell.value)))
-            except:
-                pass
+                    # Check if the cell is part of a merged range
+                    if any(cell.coordinate in merged_range for merged_range in ws.merged_cells):
+                        continue  # Skip merged cells
+                    
+                    col_letter = get_column_letter(cell.column)
+                    column_widths[col_letter] = max(column_widths.get(col_letter, 0), len(str(cell.value)))
 
-        adjusted_width = max_length + 2  # Add extra space for visibility
-        ws.column_dimensions[col_letter].width = adjusted_width
+        for col, width in column_widths.items():
+            ws.column_dimensions[col].width = width + 2  # Add padding
 
     wb.save(file_path)
-
 
 def show_history():
     global history_window, history_window_open
