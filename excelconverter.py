@@ -107,6 +107,76 @@ def filter_in_out_entries(df):
 
 
 import openpyxl
+# Load the name mapping from the CSV file
+def load_name_mapping(mapping_file):
+    name_mapping = {}
+    df = pd.read_csv(mapping_file)
+    for _, row in df.iterrows():
+        name_mapping[row[0]] = row[1]
+    return name_mapping
+
+# Process .dat files and convert them to DataFrame
+def process_dat_file(dat_file, name_mapping):
+    data = []
+    with open(dat_file, 'r', encoding='utf-8') as file:
+        for line in file:
+            values = line.strip().split('|')
+            mapped_values = [name_mapping.get(value, value) for value in values]
+            data.append(mapped_values)
+
+    df = pd.DataFrame(data)
+    return df
+
+# Write to a custom-formatted Excel file
+def save_to_excel(df, output_file):
+    with pd.ExcelWriter(output_file, engine='xlsxwriter') as writer:
+        df.to_excel(writer, sheet_name='Data', index=False, header=False)
+
+        workbook = writer.book
+        worksheet = writer.sheets['Data']
+
+        # Define header format
+        header_format = workbook.add_format({
+            'bold': True,
+            'bg_color': '#4F81BD',
+            'font_color': 'white',
+            'border': 1,
+            'align': 'center',
+            'valign': 'vcenter'
+        })
+
+        # Apply formatting to header row
+        for col_num, value in enumerate(df.columns.values):
+            worksheet.write(0, col_num, value, header_format)
+
+        # Auto-adjust column width
+        for i, col in enumerate(df.columns):
+            max_length = max(df[col].astype(str).map(len).max(), len(str(col)))
+            worksheet.set_column(i, i, max_length + 2)
+
+# Main execution
+if __name__ == "__main__":
+    mapping_file = 'mapping.csv'
+    input_folder = 'dat_files'
+    output_file = 'output.xlsx'
+
+    if not os.path.exists(mapping_file):
+        print("Mapping file not found.")
+    else:
+        name_mapping = load_name_mapping(mapping_file)
+        all_data = []
+
+        for file in os.listdir(input_folder):
+            if file.endswith('.dat'):
+                df = process_dat_file(os.path.join(input_folder, file), name_mapping)
+                all_data.append(df)
+
+        if all_data:
+            final_df = pd.concat(all_data, ignore_index=True)
+            save_to_excel(final_df, output_file)
+            print(f"Excel file '{output_file}' has been created successfully.")
+        else:
+            print("No .dat files found.")
 
 def convert_batch_to_excel(files):
     for dat_file in files:
