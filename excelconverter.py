@@ -10,57 +10,37 @@ from openpyxl import load_workbook
 import subprocess
 import openpyxl
 
-# Name mapping dictionary
-name_mapping = {
-    1: "PALILEO, FORTUNATO L.",
-    2: "QUILANTANG, ALLAN C.",
-    3: "BONDOC, FREDERICK B.",
-    4: "TAMAYO, ROBERT G.",
-    5: "ALFONSO, ROSAMIE Y.",
-    6: "DE LEON, ESPERANZA M.",
-    7: "MANIQUIS, MA. ANGELINA B.",
-    8: "JACINTO, FERNANDO JR. N.",
-    9: "ILETO, ELIZABETH C.",
-    11: "PEÑA, JOHN RONWALDO C.",
-    12: "DEPANO, ELSON JR. T.",
-    13: "OMBAO, RODEL A.",
-    14: "VELINA, TIBOY JR. M.",
-    15: "SUBIDO, MARIETTA E.",
-    16: "CABANDING, TERESITA C.",
-    17: "GURION, CHRISTOPHER T.",
-    18: "PASCUA, NERISSA D.",
-    21: "PAZ, CHARMAINE T.",
-    22: "BUCAYU, NORMA F.",
-    23: "GUNGON, JAMES CHRISTIAN N.",
-    24: "ESTEVES, ALLAN M.",
-    25: "POMAREJOS, KATHLEEN C.",
-    27: "GOPEZ, RICHARD M.",
-    29: "REYES, JOSE GLENN G.",
-    30: "CRUZ, ARIEL C.",
-    32: "ALMERO, BEVERLY O.",
-    36: "ALZAGA, EMY F.",
-    37: "RAYOS, FERNANDO G.",
-    38: "BARING, ROBERT I.",
-    39: "RIESGO, RECHELLE N.",
-    40: "BERNALDO, MA. THERESA C.",
-    60: "DOMINGO, KIM EDWARD B."
-}
+# Global employee list
+employee_list = {}
+
 
 # Global variables
 history_window_open = False
 history_window = None  # Ensure global reference to history window
 
+
 def create_database():
     conn = sqlite3.connect("conversion_history.db")
     cursor = conn.cursor()
+
+    # Create conversion_history table
     cursor.execute("""
-        CREATE TABLE IF NOT EXISTS conversions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            filename TEXT NOT NULL,
-            converted_at TEXT NOT NULL,
-            output_path TEXT NOT NULL
+    CREATE TABLE IF NOT EXISTS conversions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        filename TEXT,
+        converted_at TEXT,
+        output_path TEXT
+    )
+    """)
+
+    # Create employees table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS employees (
+            id INTEGER PRIMARY KEY,
+            name TEXT NOT NULL
         )
     """)
+
     conn.commit()
     conn.close()
 
@@ -91,8 +71,8 @@ def filter_in_out_entries(df):
     grouped.columns = ['Name', 'Date', 'Time In', 'Time Out']
 
     # Add employee number based on the name mapping
-    reverse_mapping = {v: k for k, v in name_mapping.items()}  # Reverse mapping
-    grouped['Employee No.'] = grouped['Name'].map(reverse_mapping)
+    name_to_id = {v: k for k, v in employee_list.items()}
+    grouped['Employee No.'] = grouped['Name'].map(name_to_id)
 
     # If only one log exists, mark 'Time Out' as "No Out"
     grouped['Time Out'] = grouped.apply(
@@ -129,7 +109,7 @@ def convert_batch_to_excel(files):
                 return
 
             df.columns = ["Name", "Timestamp"] + [f"Col_{i}" for i in range(2, df.shape[1])]
-            df["Name"] = df["Name"].map(name_mapping).fillna(df["Name"].astype(str))
+            df["Name"] = df["Name"].map(lambda x: employee_list.get(int(x), str(x)))
 
             df["Timestamp"] = pd.to_datetime(df["Timestamp"], errors="coerce")
             df = df.dropna(subset=["Timestamp"])  # Remove invalid timestamps
@@ -185,6 +165,45 @@ def convert_batch_to_excel(files):
 
         except Exception as e:
             messagebox.showerror("Error", f"Failed to convert {os.path.basename(dat_file)}: {e}")
+
+def upload_employee_list():
+    global employee_list
+    file_path = filedialog.askopenfilename(
+        title="Select Employee List TXT File",
+        filetypes=[("Text Files", "*.txt")]
+    )
+
+    if file_path:
+        try:
+            conn = sqlite3.connect("conversion_history.db")
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM employees")  # Clear existing list
+
+            with open(file_path, 'r') as file:
+                employee_list.clear()
+                for line in file:
+                    parts = line.strip().split(' ', 1)
+                    if len(parts) == 2:
+                        emp_id = int(parts[0])
+                        emp_name = parts[1].strip().upper()
+                        employee_list[emp_id] = emp_name
+                        cursor.execute("INSERT INTO employees (id, name) VALUES (?, ?)", (emp_id, emp_name))
+
+            conn.commit()
+            conn.close()
+            messagebox.showinfo("Success", "Employee list saved and updated successfully!")
+
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to upload employee list: {e}")
+
+def load_employee_list():
+    global employee_list
+    conn = sqlite3.connect("conversion_history.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, name FROM employees")
+    rows = cursor.fetchall()
+    employee_list = {emp_id: name for emp_id, name in rows}
+    conn.close()
 
 
 def generate_employee_dtr(writer, df, employee_name):
@@ -416,6 +435,11 @@ def create_gui():
                                fg="white", bg="#2196F3", relief="flat", padx=20, pady=10, cursor="hand2")
     history_button.grid(row=0, column=1, padx=5)
 
+    # Upload button below, centered between Select and History buttons
+    upload_button = tk.Button(frame, text="Upload Employee List", command=upload_employee_list, font=("Segoe UI", 12, "bold"), 
+                              fg="white", bg="#CF9FFF", relief="flat", padx=20, pady=10, cursor="hand2")
+    upload_button.grid(row=1, column=0, columnspan=2, pady=10)
+
     # Frame for Listbox and Scrollbar
     listbox_frame = tk.Frame(root, bg="#f5f5f5")
     listbox_frame.pack(padx=10, pady=10, fill="both", expand=True)
@@ -438,4 +462,6 @@ def create_gui():
     root.mainloop()
 
 if __name__ == "__main__":
+    create_database()
+    load_employee_list()  # Load employee list from DB if any
     create_gui()
