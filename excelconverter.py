@@ -75,13 +75,13 @@ def save_to_database(filename, output_path):
 def filter_in_out_entries(df):
     if df.shape[1] < 2:
         return df  # Return original if insufficient columns
-    
-    first_col = df.columns[0]  # Employee ID column
+
+    first_col = df.columns[0]  # Employee ID or Name column
     time_col = df.columns[1]  # Timestamp column
 
     # Convert timestamp to datetime
     df[time_col] = pd.to_datetime(df[time_col])
-    
+
     # Extract date and time
     df['Date'] = df[time_col].dt.strftime('%Y-%m-%d')  # Extract date
     df['Time'] = df[time_col].dt.strftime('%H:%M:%S')  # Extract time only
@@ -90,20 +90,27 @@ def filter_in_out_entries(df):
     grouped = df.groupby([first_col, 'Date'])['Time'].agg(['first', 'last']).reset_index()
     grouped.columns = ['Name', 'Date', 'Time In', 'Time Out']
 
-    # If only one log exists, mark 'Time Out' as "no out"
-    grouped['Time Out'] = grouped.apply(lambda row: row['Time Out'] if row['Time In'] != row['Time Out'] else 'no out', axis=1)
+    # Add employee number based on the name mapping
+    reverse_mapping = {v: k for k, v in name_mapping.items()}  # Reverse mapping
+    grouped['Employee No.'] = grouped['Name'].map(reverse_mapping)
 
-    # Pivot the table to make dates the column headers
-    pivot_df = grouped.pivot(index="Name", columns="Date", values=["Time In", "Time Out"])
+    # If only one log exists, mark 'Time Out' as "No Out"
+    grouped['Time Out'] = grouped.apply(
+        lambda row: row['Time Out'] if row['Time In'] != row['Time Out'] else 'No Out', axis=1
+    )
 
-    # Flatten MultiIndex columns and make the 'Time In' and 'Time Out' columns side by side for each date
-    pivot_df.columns = [f"{col[1]} {col[0]}" for col in pivot_df.columns]
+    # Pivot the data so each day has Time In and Time Out side by side
+    result = grouped.pivot(index=['Employee No.', 'Name'], columns='Date', values=['Time In', 'Time Out'])
+    result = result.swaplevel(axis=1).sort_index(axis=1, level=0)
 
-    # Reset index to make 'Name' a column again
-    pivot_df = pivot_df.reset_index()
+    # Flatten MultiIndex columns for better formatting
+    result.columns = [f"{date} {status}" for date, status in result.columns]
+    
+    # Reset index and sort based on the employee number
+    result = result.reset_index()
+    result = result.sort_values(by="Employee No.").reset_index(drop=True)
 
-    return pivot_df
-
+    return result
 
 
 import openpyxl
