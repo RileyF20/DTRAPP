@@ -7,6 +7,7 @@ from datetime import datetime
 from openpyxl.styles import Alignment, Font
 from openpyxl.utils import get_column_letter
 from openpyxl import load_workbook
+from datetime import datetime, timedelta
 import subprocess
 import openpyxl
 
@@ -56,41 +57,50 @@ def filter_in_out_entries(df):
     if df.shape[1] < 2:
         return df  # Return original if insufficient columns
 
-    first_col = df.columns[0]  # Employee ID or Name column
+    first_col = df.columns[0]  # Employee Name column
     time_col = df.columns[1]  # Timestamp column
 
-    # Convert timestamp to datetime
-    df[time_col] = pd.to_datetime(df[time_col])
-
-    # Extract date and time
+    df[time_col] = pd.to_datetime(df[time_col], errors='coerce')
     df['Date'] = df[time_col].dt.strftime('%Y-%m-%d')  # Extract date
     df['Time'] = df[time_col].dt.strftime('%H:%M:%S')  # Extract time only
 
-    # Get first time in and last time out for each employee per day
     grouped = df.groupby([first_col, 'Date'])['Time'].agg(['first', 'last']).reset_index()
     grouped.columns = ['Name', 'Date', 'Time In', 'Time Out']
 
-    # Add employee number based on the name mapping
+    if not df.empty:
+        last_recorded_date = df[time_col].max().strftime('%Y-%m-%d')  # Get last date in .dat file
+        year, month = df[time_col].min().year, df[time_col].min().month
+        first_day = datetime(year, month, 1)
+        last_day = (first_day.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
+        all_dates = pd.date_range(first_day, last_day).strftime('%Y-%m-%d')
+
+        all_employees = grouped['Name'].unique()
+        full_index = pd.MultiIndex.from_product([all_employees, all_dates], names=['Name', 'Date'])
+        grouped = grouped.set_index(['Name', 'Date']).reindex(full_index).reset_index()
+
+    # Fill missing Time In and Time Out based on last recorded date
+    grouped['Time In'] = grouped.apply(
+        lambda row: 'Absent' if row['Date'] <= last_recorded_date and pd.isna(row['Time In']) else row['Time In'],
+        axis=1
+    )
+    grouped['Time Out'] = grouped.apply(
+        lambda row: 'Absent' if row['Date'] <= last_recorded_date and pd.isna(row['Time Out']) else row['Time Out'],
+        axis=1
+    )
+
+    # Convert NaN to empty strings for dates after the last recorded date
+    grouped.fillna('', inplace=True)
+
+    # Add Employee No. based on the name mapping
     name_to_id = {v: k for k, v in employee_list.items()}
     grouped['Employee No.'] = grouped['Name'].map(name_to_id)
 
-    # If only one log exists, mark 'Time Out' as "No Out"
-    grouped['Time Out'] = grouped.apply(
-        lambda row: row['Time Out'] if row['Time In'] != row['Time Out'] else 'No Out', axis=1
-    )
-
-    # Pivot the data so each day has Time In and Time Out side by side
     result = grouped.pivot(index=['Employee No.', 'Name'], columns='Date', values=['Time In', 'Time Out'])
     result = result.swaplevel(axis=1).sort_index(axis=1, level=0)
-
-    # Flatten MultiIndex columns for better formatting
     result.columns = [f"{date} {status}" for date, status in result.columns]
-    
-    # Reset index and sort based on the employee number
-    result = result.reset_index()
-    result = result.sort_values(by="Employee No.").reset_index(drop=True)
 
-    return result
+    return result.reset_index().sort_values(by="Employee No.").reset_index(drop=True)
+
 
 
 import openpyxl
