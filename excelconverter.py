@@ -78,15 +78,21 @@ def filter_in_out_entries(df):
         full_index = pd.MultiIndex.from_product([all_employees, all_dates], names=['Name', 'Date'])
         grouped = grouped.set_index(['Name', 'Date']).reindex(full_index).reset_index()
 
-    # Fill missing Time In and Time Out based on last recorded date
-    grouped['Time In'] = grouped.apply(
-        lambda row: 'Absent' if row['Date'] <= last_recorded_date and pd.isna(row['Time In']) else row['Time In'],
-        axis=1
-    )
-    grouped['Time Out'] = grouped.apply(
-        lambda row: 'Absent' if row['Date'] <= last_recorded_date and pd.isna(row['Time Out']) else row['Time Out'],
-        axis=1
-    )
+    # Determine day of the week for each date
+    grouped['DayOfWeek'] = grouped['Date'].apply(lambda x: datetime.strptime(x, '%Y-%m-%d').strftime('%A'))
+
+    # Fill missing Time In and Time Out
+    def mark_absences(row):
+        if pd.isna(row['Time In']) and pd.isna(row['Time Out']):
+            if row['DayOfWeek'] == 'Saturday':
+                return "Saturday", "Saturday"
+            elif row['DayOfWeek'] == 'Sunday':
+                return "Sunday", "Sunday"
+            elif row['Date'] <= last_recorded_date:
+                return "Absent", "Absent"
+        return row['Time In'], row['Time Out']
+
+    grouped[['Time In', 'Time Out']] = grouped.apply(mark_absences, axis=1, result_type="expand")
 
     # Convert NaN to empty strings for dates after the last recorded date
     grouped.fillna('', inplace=True)
@@ -100,8 +106,6 @@ def filter_in_out_entries(df):
     result.columns = [f"{date} {status}" for date, status in result.columns]
 
     return result.reset_index().sort_values(by="Employee No.").reset_index(drop=True)
-
-
 
 import openpyxl
 
