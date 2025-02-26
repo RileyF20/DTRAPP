@@ -64,8 +64,11 @@ def filter_in_out_entries(df):
     df['Date'] = df[time_col].dt.strftime('%Y-%m-%d')  # Extract date
     df['Time'] = df[time_col].dt.strftime('%H:%M:%S')  # Extract time only
 
-    grouped = df.groupby([first_col, 'Date'])['Time'].agg(['first', 'last']).reset_index()
-    grouped.columns = ['Name', 'Date', 'Time In', 'Time Out']
+    grouped = df.groupby([first_col, 'Date'])['Time'].agg(list).reset_index()
+    grouped['Time In'] = grouped['Time'].apply(lambda x: x[0])  # First time log
+    grouped['Time Out'] = grouped['Time'].apply(lambda x: x[-1] if len(x) > 1 else "No Out")  # Check for single entry
+    grouped = grouped.drop(columns=['Time'])
+
 
     if not df.empty:
         last_recorded_date = df[time_col].max().strftime('%Y-%m-%d')  # Get last date in .dat file
@@ -103,7 +106,8 @@ def filter_in_out_entries(df):
 
     result = grouped.pivot(index=['Employee No.', 'Name'], columns='Date', values=['Time In', 'Time Out'])
     result = result.swaplevel(axis=1).sort_index(axis=1, level=0)
-    result.columns = [f"{date} {status}" for date, status in result.columns]
+    result.columns = [f"{date} ({datetime.strptime(date, '%Y-%m-%d').strftime('%A')}) {status}" for date, status in result.columns]
+
 
     return result.reset_index().sort_values(by="Employee No.").reset_index(drop=True)
 
