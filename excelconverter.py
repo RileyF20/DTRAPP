@@ -225,76 +225,77 @@ def load_employee_list():
 
 
 def generate_employee_dtr(writer, df, employee_name):
-    """Generates a formatted Daily Time Record (DTR) sheet for an employee."""
+    """Generates a formatted Daily Time Record (DTR) sheet for an employee with full month dates."""
     employee_df = df[df["Name"] == employee_name].copy()
+    if employee_df.empty:
+        return
+    
+    # Generate all dates for the employee's month
+    first_date = employee_df["Timestamp"].min().date()
+    year, month = first_date.year, first_date.month
+    first_day = datetime(year, month, 1)
+    last_day = (first_day.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
+    all_dates = pd.date_range(first_day, last_day).date
+
+    # Prepare full date range DataFrame
+    date_df = pd.DataFrame({"Date": all_dates})
+    date_df["Weekday"] = date_df["Date"].apply(lambda x: x.strftime('%A'))
+
+    # Extract time in and out per day
     employee_df["Date"] = employee_df["Timestamp"].dt.date
-    employee_df["Time"] = employee_df["Timestamp"].dt.strftime('%H:%M:%S')
+    grouped = employee_df.groupby("Date")["Time"].agg(list).reset_index()
+    grouped["Time In"] = grouped["Time"].apply(lambda x: x[0] if len(x) > 0 else "No In")
+    grouped["Time Out"] = grouped["Time"].apply(lambda x: x[-1] if len(x) > 1 else "No Out")
+    grouped.drop(columns=["Time"], inplace=True)
 
-    # Group by Date to get first and last times (AM Arrival, PM Departure)
-    grouped = employee_df.groupby("Date")["Time"].agg(["first", "last"]).reset_index()
-    grouped.columns = ["Date", "AM Arrival", "PM Departure"]
+    # Merge full date range with the employee data
+    final_df = pd.merge(date_df, grouped, on="Date", how="left")
 
-    # Mark "No Out" if there's only one timestamp
-    grouped["PM Departure"] = grouped.apply(
-        lambda row: row["PM Departure"] if row["AM Arrival"] != row["PM Departure"] else "No Out", axis=1
-    )
+    # Fill missing Time In and Time Out
+    def fill_missing(row):
+        if pd.isnull(row["Time In"]):
+            if row["Weekday"] == "Saturday":
+                row["Time In"] = "Saturday"
+                row["Time Out"] = "Saturday"
+            elif row["Weekday"] == "Sunday":
+                row["Time In"] = "Sunday"
+                row["Time Out"] = "Sunday"
+            else:
+                row["Time In"] = "Absent"
+                row["Time Out"] = "Absent"
+        return row
 
-    # Generate full month dates for missing records
-    first_date = grouped["Date"].min()
-    last_date = grouped["Date"].max()
-    all_dates = pd.date_range(first_date, last_date, freq='D').date
-    dtr_df = pd.DataFrame({"Date": all_dates})
+    final_df = final_df.apply(fill_missing, axis=1)
 
-    # Merge with recorded time logs
-    dtr_df = dtr_df.merge(grouped, on="Date", how="left")
+    # Count Saturdays with Time In
+    saturday_logs = final_df[(final_df["Weekday"] == "Saturday") & (final_df["Time In"] != "Saturday")].shape[0]
+    final_df.loc[0, "Saturdays"] = saturday_logs
 
-    # Extract day number and weekday names
-    dtr_df["Day"] = dtr_df["Date"].apply(lambda x: x.day)
-    dtr_df["Weekday"] = dtr_df["Date"].apply(lambda x: x.strftime('%A'))
+    # Format column order
+    final_df = final_df[["Date", "Weekday", "Time In", "Time Out"]]
 
-    # Fill in "Sunday" and "Holiday" labels
-    dtr_df["AM Arrival"].fillna(dtr_df["Weekday"].apply(lambda x: "Sunday" if x == "Sunday" else ""), inplace=True)
-    dtr_df["PM Departure"].fillna(dtr_df["Weekday"].apply(lambda x: "Sunday" if x == "Sunday" else ""), inplace=True)
+    # Write employee sheet
+    final_df.to_excel(writer, sheet_name=employee_name, index=False, startrow=7)
 
-    # Reorder columns for DTR format and add Weekday, AM Arrival, PM Departure
-    dtr_df = dtr_df[["Day", "Weekday", "AM Arrival", "PM Departure"]]
+    # Auto-adjust column widths
+    worksheet = writer.book[employee_name]
+    worksheet["A1"] = employee_name.upper()
+    worksheet["A1"].font = Font(size=14, bold=True)
+    worksheet["A1"].alignment = Alignment(horizontal="center")
+    worksheet.merge_cells("A1:D1")
 
-    # Write to Excel with formatting
-    dtr_df.to_excel(writer, sheet_name=employee_name, index=False, startrow=4)
+    worksheet["A3"] = f"For the month of {first_day.strftime('%B %d')} - {last_day.strftime('%d, %Y')}"
+    worksheet["A4"] = "Official hours for arrival and departure"
+    worksheet["A5"] = "Regular days: 7:00 AM - 4:00 PM"
+    worksheet["A6"] = f"Saturdays: {saturday_logs}".ljust(20,)
 
-    # Apply DTR formatting in Excel
-    wb = writer.book
-    ws = wb[employee_name]
-
-    # Add title and headers
-    ws["A1"] = "DAILY TIME RECORD"
-    ws["A2"] = f"Employee: {employee_name}"
-    ws["A1"].font = Font(size=14, bold=True)
-    ws["A2"].font = Font(size=12, italic=True)
-
-    # Description section below the DTR
-    month_year = first_date.strftime("%B %d-%d %Y")  # Example: "January 1-31 2025"
-    ws["A3"] = f"For the month of: {month_year}"
-    ws["A4"] = "Official hours for arrival and departure: "
-    ws["A5"] = "Regular days: 8:00 AM - 5:00 PM"
-    ws["A6"] = "Saturdays: "
-
-    # Format description cells
-    for row in range(3, 7):
-        ws[f"A{row}"].font = Font(size=10, italic=True)
-        ws[f"A{row}"].alignment = Alignment(horizontal="left")
-
-    # Adjust column widths
-    for col in ws.columns:
-        max_length = 0
-        col_letter = col[0].column_letter
+    for col in worksheet.iter_cols(min_row=8, max_row=worksheet.max_row):
+        max_length = max(len(str(cell.value)) if cell.value else 0 for cell in col)
+        col_letter = get_column_letter(col[0].column)
+        worksheet.column_dimensions[col_letter].width = max_length + 2
         for cell in col:
-            try:
-                if cell.value:
-                    max_length = max(max_length, len(str(cell.value)))
-            except:
-                pass
-        ws.column_dimensions[col_letter].width = max_length + 2
+            cell.alignment = Alignment(horizontal="center")
+
 
 
 from openpyxl.utils import get_column_letter
