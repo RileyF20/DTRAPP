@@ -173,6 +173,8 @@ def convert_batch_to_excel(files):
 
                 # Auto-adjust column widths
                 auto_adjust_column_widths(save_path)
+                
+                save_to_database(os.path.basename(dat_file), save_path)
 
                 open_file = messagebox.askyesno("Conversion Complete", "File converted successfully!\nDo you want to open it now?")
                 if open_file:
