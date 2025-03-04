@@ -209,6 +209,7 @@ def upload_employee_list():
 
             conn.commit()
             conn.close()
+            listbox_files.insert(tk.END, file_path)  # Show file name in the listbox
             messagebox.showinfo("Success", "Employee list saved and updated successfully!")
 
         except Exception as e:
@@ -422,12 +423,15 @@ def preview_selected_file(event):
         scrollbar_y.pack(side="right", fill="y")
         tree.pack(expand=True, fill="both")
 
-        def proceed_to_conversion():
-            preview_window.destroy()
-            convert_batch_to_excel([file_path])
+        if file_path.lower().endswith('.dat'):
+            def proceed_to_conversion():
+                preview_window.destroy()
+                convert_batch_to_excel([file_path])
 
-        proceed_button = tk.Button(preview_window, text="Convert", command=proceed_to_conversion, font=("Segoe UI", 12, "bold"), fg="white", bg="#4CAF50", relief="flat", padx=10, pady=5)
-        proceed_button.pack(pady=10)
+            proceed_button = tk.Button(preview_window, text="Convert", command=proceed_to_conversion, 
+                                      font=("Segoe UI", 12, "bold"), fg="white", bg="#4CAF50", 
+                                      relief="flat", padx=10, pady=5)
+            proceed_button.pack(pady=10)
 
     except Exception as e:
         messagebox.showerror("Error", f"Failed to load file: {e}")
