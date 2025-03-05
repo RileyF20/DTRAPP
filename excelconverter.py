@@ -218,7 +218,7 @@ def upload_employee_list():
             conn.commit()
             conn.close()
             employee_list_entry.insert(tk.END, file_path)  # Show file name in the listbox
-            messagebox.showinfo("Success", "Employee list saved and updated successfully!")
+            
 
         except Exception as e:
             messagebox.showerror("Error", f"Failed to upload employee list: {e}")
@@ -420,7 +420,7 @@ def upload_employee_list():
             conn.commit()
             conn.close()
             employee_list_entry.insert(tk.END, file_path)  # Show file name in the TXT listbox
-            messagebox.showinfo("Success", "Employee list saved and updated successfully!")
+            
 
         except Exception as e:
             messagebox.showerror("Error", f"Failed to upload employee list: {e}")
@@ -640,7 +640,7 @@ def upload_employee_list_from_path(file_path):
 
         conn.commit()
         conn.close()
-        messagebox.showinfo("Success", "Employee list updated successfully!")
+        
 
     except Exception as e:
         messagebox.showerror("Error", f"Failed to upload employee list: {e}")
@@ -652,7 +652,7 @@ class StyledTkinter:
         'bg_secondary': '#f1f3f5',    # Slightly darker white
         'bg_accent': '#e9ecef',       # Light gray accent
 
-        'text_primary': '#1a365d',     # Dark navy blue
+        'text_primary': '#1a365d',    # Dark navy blue
         'text_secondary': '#2c3e50',  # Slightly lighter navy blue
         'btn_primary': '#3182ce',     # Vibrant blue
         'btn_secondary': '#4a5568',   # Dark grayish blue
