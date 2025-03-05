@@ -58,37 +58,65 @@ def save_to_database(filename, output_path):
     conn.close()
 
 def filter_in_out_entries(df):
+
+    # Validate input DataFrame
     if df.shape[1] < 2:
         return df  # Return original if insufficient columns
 
+    # Identify columns
     first_col = df.columns[0]  # Employee Name column
     time_col = df.columns[1]  # Timestamp column
 
+    # Convert timestamp and extract date and time
     df[time_col] = pd.to_datetime(df[time_col], errors='coerce')
-    df['Date'] = df[time_col].dt.strftime('%Y-%m-%d')  # Extract date
-    df['Time'] = df[time_col].dt.strftime('%H:%M:%S')  # Extract time only
+    df['Date'] = df[time_col].dt.strftime('%Y-%m-%d')
+    df['Time'] = df[time_col].dt.strftime('%H:%M:%S')
+    df['Hour'] = df[time_col].dt.hour
 
+    # Group logs by employee and date
     grouped = df.groupby([first_col, 'Date'])['Time'].agg(list).reset_index()
-    grouped['Time In'] = grouped['Time'].apply(lambda x: x[0])  # First time log
-    grouped['Time Out'] = grouped['Time'].apply(lambda x: x[-1] if len(x) > 1 else "No Out")  # Check for single entry
+    
+    # Determine time-in and time-out logs
+    def process_daily_logs(times, hours):
+        # Sort times to ensure chronological order
+        sorted_times = sorted(zip(times, hours), key=lambda x: x[1])
+        
+        if len(sorted_times) == 1:
+            # Single log handling
+            time, hour = sorted_times[0]
+            if hour < 12:
+                return time, "No Out"
+            else:
+                return "No In", time
+        else:
+            # Multiple logs
+            return sorted_times[0][0], sorted_times[-1][0]
+
+    # Apply log processing
+    grouped[['Time In', 'Time Out']] = grouped.apply(
+        lambda row: pd.Series(process_daily_logs(row['Time'], 
+            df[(df[first_col] == row[first_col]) & (df['Date'] == row['Date'])]['Hour'])), 
+        axis=1
+    )
     grouped = grouped.drop(columns=['Time'])
 
-
+    # Generate full date range for the month
     if not df.empty:
-        last_recorded_date = df[time_col].max().strftime('%Y-%m-%d')  # Get last date in .dat file
+        last_recorded_date = df[time_col].max().strftime('%Y-%m-%d')
         year, month = df[time_col].min().year, df[time_col].min().month
         first_day = datetime(year, month, 1)
         last_day = (first_day.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
         all_dates = pd.date_range(first_day, last_day).strftime('%Y-%m-%d')
 
-        all_employees = grouped['Name'].unique()
-        full_index = pd.MultiIndex.from_product([all_employees, all_dates], names=['Name', 'Date'])
-        grouped = grouped.set_index(['Name', 'Date']).reindex(full_index).reset_index()
+        # Create full index for all employees and dates
+        all_employees = grouped[first_col].unique()
+        full_index = pd.MultiIndex.from_product([all_employees, all_dates], names=[first_col, 'Date'])
+        grouped = grouped.set_index([first_col, 'Date']).reindex(full_index).reset_index()
 
-    # Determine day of the week for each date
+    # Determine day of the week
     grouped['DayOfWeek'] = grouped['Date'].apply(lambda x: datetime.strptime(x, '%Y-%m-%d').strftime('%A'))
 
-    # Fill missing Time In and Time Out
+    # Mark absences and weekend days
     def mark_absences(row):
         if pd.isna(row['Time In']) and pd.isna(row['Time Out']):
             if row['DayOfWeek'] == 'Saturday':
@@ -101,17 +129,18 @@ def filter_in_out_entries(df):
 
     grouped[['Time In', 'Time Out']] = grouped.apply(mark_absences, axis=1, result_type="expand")
 
-    # Convert NaN to empty strings for dates after the last recorded date
+    # Fill NaN values
     grouped.fillna('', inplace=True)
 
-    # Add Employee No. based on the name mapping
+    # Add Employee No. mapping (assuming employee_list is defined elsewhere)
     name_to_id = {v: k for k, v in employee_list.items()}
     grouped['Employee No.'] = grouped['Name'].map(name_to_id)
 
+    # Pivot and format results
     result = grouped.pivot(index=['Employee No.', 'Name'], columns='Date', values=['Time In', 'Time Out'])
     result = result.swaplevel(axis=1).sort_index(axis=1, level=0)
-    result.columns = [f"{date} ({datetime.strptime(date, '%Y-%m-%d').strftime('%A')}) {status}" for date, status in result.columns]
-
+    result.columns = [f"{date} ({datetime.strptime(date, '%Y-%m-%d').strftime('%A')}) {status}" 
+                      for date, status in result.columns]
 
     return result.reset_index().sort_values(by="Employee No.").reset_index(drop=True)
 
@@ -234,12 +263,13 @@ def load_employee_list():
 
 
 def generate_employee_dtr(writer, df, employee_name):
-    """Generates a formatted Daily Time Record (DTR) sheet for an employee with full month dates."""
+    
+    # Filter data for specific employee
     employee_df = df[df["Name"] == employee_name].copy()
     if employee_df.empty:
         return
     
-    # Generate all dates for the employee's month
+    # Generate date range for the month
     first_date = employee_df["Timestamp"].min().date()
     year, month = first_date.year, first_date.month
     first_day = datetime(year, month, 1)
@@ -250,53 +280,95 @@ def generate_employee_dtr(writer, df, employee_name):
     date_df = pd.DataFrame({"Date": all_dates})
     date_df["Weekday"] = date_df["Date"].apply(lambda x: x.strftime('%A'))
 
-    # Extract time in and out per day
+    # Extract and process time logs
     employee_df["Date"] = employee_df["Timestamp"].dt.date
-    grouped = employee_df.groupby("Date")["Time"].agg(list).reset_index()
-    grouped["Time In"] = grouped["Time"].apply(lambda x: x[0] if len(x) > 0 else "No In")
-    grouped["Time Out"] = grouped["Time"].apply(lambda x: x[-1] if len(x) > 1 else "No Out")
-    grouped.drop(columns=["Time"], inplace=True)
+    employee_df["Hour"] = employee_df["Timestamp"].dt.hour
+    employee_df["Time"] = employee_df["Timestamp"].dt.strftime("%H:%M:%S")
 
-    # Merge full date range with the employee data
+    # Group and process logs with more sophisticated time-in/out logic
+    def process_daily_logs(group):
+        # Sort logs by hour to ensure correct time-in and time-out
+        sorted_logs = group.sort_values("Hour")
+        
+        # Determine time-in and time-out
+        if len(sorted_logs) == 1:
+            # Single log handling
+            log = sorted_logs.iloc[0]
+            if log["Hour"] < 12:
+                return pd.Series({
+                    "Arrival": log["Time"],
+                    "Departure": "No Out",
+                    "Undertime": ""
+                })
+            else:
+                return pd.Series({
+                    "Arrival": "No In",
+                    "Departure": log["Time"],
+                    "Undertime": ""
+                })
+        else:
+            # Multiple logs
+            first_log = sorted_logs.iloc[0]
+            last_log = sorted_logs.iloc[-1]
+            
+            # Calculate work duration
+            first_datetime = pd.to_datetime(first_log["Time"], format="%H:%M:%S")
+            last_datetime = pd.to_datetime(last_log["Time"], format="%H:%M:%S")
+            work_duration = (last_datetime - first_datetime).seconds / 3600
+            
+            return pd.Series({
+                "Arrival": first_log["Time"],
+                "Departure": last_log["Time"],
+                "Undertime": "Undertime" if work_duration < 8 else ""
+            })
+
+    # Group and process logs
+    grouped = employee_df.groupby("Date").apply(process_daily_logs).reset_index()
+
+    # Merge full date range with processed logs
     final_df = pd.merge(date_df, grouped, on="Date", how="left")
 
-    # Fill missing Time In and Time Out
+    # Fill missing entries for weekends and absences
     def fill_missing(row):
-        if pd.isnull(row["Time In"]):
+        if pd.isnull(row["Arrival"]):
             if row["Weekday"] == "Saturday":
-                row["Time In"] = "Saturday"
-                row["Time Out"] = "Saturday"
+                row["Arrival"] = "Saturday"
+                row["Departure"] = "Saturday"
+                row["Undertime"] = ""
             elif row["Weekday"] == "Sunday":
-                row["Time In"] = "Sunday"
-                row["Time Out"] = "Sunday"
+                row["Arrival"] = "Sunday"
+                row["Departure"] = "Sunday"
+                row["Undertime"] = ""
             else:
-                row["Time In"] = "Absent"
-                row["Time Out"] = "Absent"
+                row["Arrival"] = "Absent"
+                row["Departure"] = "Absent"
+                row["Undertime"] = ""
         return row
 
     final_df = final_df.apply(fill_missing, axis=1)
 
-    # Count Saturdays with Time In
-    saturday_logs = final_df[(final_df["Weekday"] == "Saturday") & (final_df["Time In"] != "Saturday")].shape[0]
+    # Count Saturdays with actual logs
+    saturday_logs = final_df[(final_df["Weekday"] == "Saturday") & 
+                              (final_df["Arrival"] != "Saturday")].shape[0]
     final_df.loc[0, "Saturdays"] = saturday_logs
 
     # Format column order
-    final_df = final_df[["Date", "Weekday", "Time In", "Time Out"]]
+    final_df = final_df[["Date", "Weekday", "Arrival", "Departure", "Undertime"]]
 
     # Write employee sheet
     final_df.to_excel(writer, sheet_name=employee_name, index=False, startrow=7)
 
-    # Auto-adjust column widths
+    # Auto-adjust column widths and formatting (keep existing formatting code)
     worksheet = writer.book[employee_name]
     worksheet["A1"] = employee_name.upper()
     worksheet["A1"].font = Font(size=14, bold=True)
     worksheet["A1"].alignment = Alignment(horizontal="center")
-    worksheet.merge_cells("A1:D1")
+    worksheet.merge_cells("A1:E1")
 
     worksheet["A3"] = f"For the month of {first_day.strftime('%B %d')} - {last_day.strftime('%d, %Y')}"
     worksheet["A4"] = "Official hours for arrival and departure"
-    worksheet["A5"] = "Regular days: 7:00 AM - 4:00 PM"
-    worksheet["A6"] = f"Saturdays: {saturday_logs}".ljust(20,)
+    worksheet["A5"] = "Regular days: 8:00 AM - 5:00 PM"
+    worksheet["A6"] = f"Saturdays: {saturday_logs}"
 
     for col in worksheet.iter_cols(min_row=8, max_row=worksheet.max_row):
         max_length = max(len(str(cell.value)) if cell.value else 0 for cell in col)
@@ -304,7 +376,6 @@ def generate_employee_dtr(writer, df, employee_name):
         worksheet.column_dimensions[col_letter].width = max_length + 2
         for cell in col:
             cell.alignment = Alignment(horizontal="center")
-
 
 
 from openpyxl.utils import get_column_letter
