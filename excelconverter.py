@@ -189,6 +189,8 @@ def convert_batch_to_excel(files):
 
         except Exception as e:
             messagebox.showerror
+        except Exception as e:
+            messagebox.showerror
 
 def upload_employee_list():
     global employee_list
@@ -562,6 +564,7 @@ def browse_and_preview_employee_list():
     )
 
     if file_path:
+        # Clear previous entries
         employee_list_entry.delete(0, tk.END)
         employee_list_entry.insert(0, file_path)
 
@@ -600,7 +603,6 @@ def browse_and_preview_dat_files():
                 preview_dat_files.insert(tk.END, f"Error reading {file_path}: {e}\n\n")
         
         preview_dat_files.config(state=tk.DISABLED)
-
 def convert_files():
     employee_file = employee_list_entry.get()
     dat_files = dat_file_entry.get().split(", ")
@@ -643,103 +645,321 @@ def upload_employee_list_from_path(file_path):
     except Exception as e:
         messagebox.showerror("Error", f"Failed to upload employee list: {e}")
 
-def create_improved_gui():
-    global root, employee_list_entry, dat_file_entry, preview_employee_list, preview_dat_files
+class StyledTkinter:
+    # Color Palette
+    COLORS = {
+        'bg_primary': '#f8f9fa',      # Light gray-white
+        'bg_secondary': '#f1f3f5',    # Slightly darker white
+        'bg_accent': '#e9ecef',       # Light gray accent
 
+        'text_primary': '#1a365d',     # Dark navy blue
+        'text_secondary': '#2c3e50',  # Slightly lighter navy blue
+        'btn_primary': '#3182ce',     # Vibrant blue
+        'btn_secondary': '#4a5568',   # Dark grayish blue
+        'btn_success': '#48bb78',     # Green for success
+        'btn_warning': '#ed8936',     # Orange for warnings
+        'border_color': '#cbd5e0'     # Light border color
+    }
+
+    @classmethod
+    def create_styled_button(cls, parent, text, command, style='primary', width=None):
+        btn_styles = {
+            'primary': {
+                'bg': cls.COLORS['btn_primary'], 
+                'fg': 'white', 
+                'hover_bg': '#2c5282'
+            },
+            'secondary': {
+                'bg': cls.COLORS['btn_secondary'], 
+                'fg': 'white', 
+                'hover_bg': '#718096'
+            },
+            'success': {
+                'bg': cls.COLORS['btn_success'], 
+                'fg': 'white', 
+                'hover_bg': '#38a169'
+            },
+            'warning': {
+                'bg': cls.COLORS['btn_warning'], 
+                'fg': 'white', 
+                'hover_bg': '#dd6b20'
+            }
+        }
+
+        current_style = btn_styles.get(style, btn_styles['primary'])
+        
+        btn = tk.Button(
+            parent, 
+            text=text, 
+            command=command,
+            bg=current_style['bg'], 
+            fg=current_style['fg'],
+            font=("Segoe UI", 10, "bold"),
+            relief=tk.FLAT,
+            padx=10,
+            pady=5
+        )
+
+        if width:
+            btn.config(width=width)
+
+        # Hover effects
+        def on_enter(e):
+            btn.config(bg=current_style['hover_bg'])
+
+        def on_leave(e):
+            btn.config(bg=current_style['bg'])
+
+        btn.bind("<Enter>", on_enter)
+        btn.bind("<Leave>", on_leave)
+
+        return btn
+
+    @classmethod
+    def create_styled_entry(cls, parent, width=50):
+        entry = tk.Entry(
+            parent, 
+            font=("Segoe UI", 10), 
+            width=width,
+            bg=cls.COLORS['bg_secondary'],
+            fg=cls.COLORS['text_primary'],
+            insertbackground=cls.COLORS['text_primary'],
+            relief=tk.FLAT,
+            highlightthickness=1,
+            highlightcolor=cls.COLORS['border_color'],
+            highlightbackground=cls.COLORS['border_color']
+        )
+        return entry
+
+    @classmethod
+    def create_styled_label(cls, parent, text, style='primary'):
+        label_styles = {
+            'primary': {
+                'fg': cls.COLORS['text_primary'],
+                'font': ("Segoe UI", 10, "bold")
+            },
+            'secondary': {
+                'fg': cls.COLORS['text_secondary'],
+                'font': ("Segoe UI", 10)
+            }
+        }
+        
+        current_style = label_styles.get(style, label_styles['primary'])
+        
+        label = tk.Label(
+            parent, 
+            text=text, 
+            fg=current_style['fg'],
+            font=current_style['font'],
+            bg=cls.COLORS['bg_primary']
+        )
+        return label
+
+def create_improved_gui():
     root = tk.Tk()
     root.title("Employee DTR Converter")
-    root.geometry("800x700")
-    root.configure(bg="#f0f0f0")
+    root.geometry("900x800")
+    root.configure(bg=StyledTkinter.COLORS['bg_primary'])
 
     # Main Container
-    main_container = tk.Frame(root, bg="#f0f0f0", padx=20, pady=20)
+    main_container = tk.Frame(root, bg=StyledTkinter.COLORS['bg_primary'], padx=30, pady=30)
     main_container.pack(fill=tk.BOTH, expand=True)
 
     # Title
-    title_label = tk.Label(main_container, text="Employee DTR Converter", 
-                            font=("Segoe UI", 15, "bold"), bg="#f0f0f0", fg="#333")
-    title_label.pack(pady=(0, 10))
+    title_label = StyledTkinter.create_styled_label(
+        main_container, 
+        "Employee DTR Converter", 
+        style='primary'
+    )
+    title_label.config(font=("Segoe UI", 18, "bold"))
+    title_label.pack(pady=(0, 20))
 
     # Employee List Section
-    employee_section = tk.LabelFrame(main_container, text="Employee List", 
-                                     font=("Segoe UI", 12, "bold"), bg="#f0f0f0")
+    employee_section = tk.LabelFrame(
+        main_container, 
+        text="Employee List", 
+        font=("Segoe UI", 12, "bold"), 
+        bg=StyledTkinter.COLORS['bg_primary'],
+        fg=StyledTkinter.COLORS['text_primary'],
+        labelanchor='n',
+        borderwidth=2,
+        relief=tk.GROOVE
+    )
     employee_section.pack(fill=tk.X, pady=10)
 
-    employee_row = tk.Frame(employee_section, bg="#f0f0f0")
+    employee_row = tk.Frame(employee_section, bg=StyledTkinter.COLORS['bg_primary'])
     employee_row.pack(padx=10, pady=10, fill=tk.X)
 
-    employee_list_label = tk.Label(employee_row, text="Employee List File:", 
-                                   font=("Segoe UI", 10), bg="#f0f0f0")
+    # Employee List Label
+    employee_list_label = StyledTkinter.create_styled_label(
+        employee_row, 
+        "Employee List File:", 
+        style='secondary'
+    )
     employee_list_label.pack(side=tk.LEFT, padx=(0, 10))
 
-    employee_list_entry = tk.Entry(employee_row, font=("Segoe UI", 10), width=50)
+    # Employee List Entry
+    employee_list_entry = StyledTkinter.create_styled_entry(employee_row, width=50)
     employee_list_entry.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(0, 10))
 
-    employee_upload_btn = tk.Button(employee_row, text="Browse", 
-                                    command=lambda: browse_and_preview_employee_list(),
-                                    font=("Segoe UI", 10), bg="#4CAF50", fg="white")
+    # Employee List Browse Button
+    employee_upload_btn = StyledTkinter.create_styled_button(
+        employee_row, 
+        "Browse", 
+        lambda: browse_and_preview_employee_list(),
+        style='primary'
+    )
     employee_upload_btn.pack(side=tk.LEFT)
 
+    # Employee List Preview Frame
+    employee_preview_frame = tk.Frame(employee_section, bg=StyledTkinter.COLORS['bg_primary'])
+    employee_preview_frame.pack(padx=10, pady=10, fill=tk.X)
+
     # Employee List Preview
-    preview_employee_list = tk.Text(employee_section, height=5, font=("Courier", 10), 
-                                    state=tk.DISABLED, wrap=tk.NONE)
-    preview_employee_list.pack(padx=10, pady=10, fill=tk.X)
+    preview_employee_list = tk.Text(
+        employee_preview_frame, 
+        height=5, 
+        font=("Courier", 10), 
+        state=tk.DISABLED, 
+        wrap=tk.NONE,
+        bg=StyledTkinter.COLORS['bg_secondary'],
+        fg=StyledTkinter.COLORS['text_primary']
+    )
+    preview_employee_list.pack(side=tk.LEFT, expand=True, fill=tk.X)
+
+    # Employee Preview Scrollbars
+    employee_preview_scrollbar_y = tk.Scrollbar(
+        employee_preview_frame, 
+        orient=tk.VERTICAL, 
+        command=preview_employee_list.yview,
+        bg=StyledTkinter.COLORS['bg_accent']
+    )
+    employee_preview_scrollbar_y.pack(side=tk.RIGHT, fill=tk.Y)
+    
+    employee_preview_scrollbar_x = tk.Scrollbar(
+        employee_section, 
+        orient=tk.HORIZONTAL, 
+        command=preview_employee_list.xview,
+        bg=StyledTkinter.COLORS['bg_accent']
+    )
+    employee_preview_scrollbar_x.pack(fill=tk.X, padx=10)
+    
+    preview_employee_list.configure(
+        yscrollcommand=employee_preview_scrollbar_y.set,
+        xscrollcommand=employee_preview_scrollbar_x.set
+    )
 
     # DAT Files Section
-    dat_section = tk.LabelFrame(main_container, text="DTR Files", 
-                                font=("Segoe UI", 12, "bold"), bg="#f0f0f0")
+    dat_section = tk.LabelFrame(
+        main_container, 
+        text="DTR Files", 
+        font=("Segoe UI", 12, "bold"), 
+        bg=StyledTkinter.COLORS['bg_primary'],
+        fg=StyledTkinter.COLORS['text_primary'],
+        labelanchor='n',
+        borderwidth=2,
+        relief=tk.GROOVE
+    )
     dat_section.pack(fill=tk.X, pady=10)
 
-    dat_row = tk.Frame(dat_section, bg="#f0f0f0")
+    dat_row = tk.Frame(dat_section, bg=StyledTkinter.COLORS['bg_primary'])
     dat_row.pack(padx=10, pady=10, fill=tk.X)
 
-    dat_file_label = tk.Label(dat_row, text="DTR Files:", 
-                              font=("Segoe UI", 10), bg="#f0f0f0")
+    # DAT Files Label
+    dat_file_label = StyledTkinter.create_styled_label(
+        dat_row, 
+        "DTR Files:", 
+        style='secondary'
+    )
     dat_file_label.pack(side=tk.LEFT, padx=(0, 10))
 
-    dat_file_entry = tk.Entry(dat_row, font=("Segoe UI", 10), width=50)
+    # DAT Files Entry
+    dat_file_entry = StyledTkinter.create_styled_entry(dat_row, width=50)
     dat_file_entry.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(0, 10))
 
-    dat_upload_btn = tk.Button(dat_row, text="Browse", 
-                               command=lambda: browse_and_preview_dat_files(),
-                               font=("Segoe UI", 10), bg="#2196F3", fg="white")
+    # DAT Files Browse Button
+    dat_upload_btn = StyledTkinter.create_styled_button(
+        dat_row, 
+        "Browse", 
+        lambda: browse_and_preview_dat_files(),
+        style='primary'
+    )
     dat_upload_btn.pack(side=tk.LEFT)
 
+    # DAT Files Preview Frame
+    dat_preview_frame = tk.Frame(dat_section, bg=StyledTkinter.COLORS['bg_primary'])
+    dat_preview_frame.pack(padx=10, pady=10, fill=tk.X)
+
     # DAT Files Preview
-    preview_dat_files = tk.Text(dat_section, height=10, font=("Courier", 10), 
-                                state=tk.DISABLED, wrap=tk.NONE)
-    preview_dat_files.pack(padx=10, pady=10, fill=tk.X)
+    preview_dat_files = tk.Text(
+        dat_preview_frame, 
+        height=10, 
+        font=("Courier", 10), 
+        state=tk.DISABLED, 
+        wrap=tk.NONE,
+        bg=StyledTkinter.COLORS['bg_secondary'],
+        fg=StyledTkinter.COLORS['text_primary']
+    )
+    preview_dat_files.pack(side=tk.LEFT, expand=True, fill=tk.X)
 
-    # History Button
-    history_btn = tk.Button(main_container, text="View Conversion History", 
-                            command=show_history, 
-                            font=("Segoe UI", 12), 
-                            bg="#9C27B0", fg="white")
-    history_btn.pack(pady=2)
-
-    # Conversion Button
-    convert_btn = tk.Button(main_container, text="Convert DTR to Excel", 
-                            command=convert_files, 
-                            font=("Segoe UI", 12, "bold"), 
-                            bg="#FF9800", fg="white")
-    convert_btn.pack(pady=2, padx=20)
-
-    # Scroll bars for previews
-    employee_preview_scrollbar_x = tk.Scrollbar(employee_section, orient=tk.HORIZONTAL, 
-                                                command=preview_employee_list.xview)
-    employee_preview_scrollbar_x.pack(fill=tk.X, padx=3)
-    preview_employee_list.configure(xscrollcommand=employee_preview_scrollbar_x.set)
-
-    dat_preview_scrollbar_x = tk.Scrollbar(dat_section, orient=tk.HORIZONTAL, 
-                                           command=preview_dat_files.xview)
+    # DAT Preview Scrollbars
+    dat_preview_scrollbar_y = tk.Scrollbar(
+        dat_preview_frame, 
+        orient=tk.VERTICAL, 
+        command=preview_dat_files.yview,
+        bg=StyledTkinter.COLORS['bg_accent']
+    )
+    dat_preview_scrollbar_y.pack(side=tk.RIGHT, fill=tk.Y)
+    
+    dat_preview_scrollbar_x = tk.Scrollbar(
+        dat_section, 
+        orient=tk.HORIZONTAL, 
+        command=preview_dat_files.xview,
+        bg=StyledTkinter.COLORS['bg_accent']
+    )
     dat_preview_scrollbar_x.pack(fill=tk.X, padx=10)
-    preview_dat_files.configure(xscrollcommand=dat_preview_scrollbar_x.set)
+    
+    preview_dat_files.configure(
+        yscrollcommand=dat_preview_scrollbar_y.set,
+        xscrollcommand=dat_preview_scrollbar_x.set
+    )
 
-    root.mainloop()
+    # Conversion and History Buttons
+    button_frame = tk.Frame(main_container, bg=StyledTkinter.COLORS['bg_primary'])
+    button_frame.pack(pady=10)
+
+    history_btn = StyledTkinter.create_styled_button(
+        button_frame, 
+        "View Conversion History", 
+        show_history,
+        style='secondary'
+    )
+    history_btn.pack(side=tk.LEFT, padx=10)
+
+    convert_btn = StyledTkinter.create_styled_button(
+        button_frame, 
+        "Convert DTR to Excel", 
+        convert_files,
+        style='success'
+    )
+    convert_btn.pack(side=tk.LEFT, padx=10)
+
+    return root, employee_list_entry, preview_employee_list, dat_file_entry, preview_dat_files
+    
 
 # Replace the original create_gui() function with this new one
 # Modify the main block
 if __name__ == "__main__":
     create_database()
     load_employee_list()  # Load employee list from DB if any
-    create_improved_gui()
+    
+    # Create the root window and key widgets using the new method
+    root, employee_list_entry, preview_employee_list, dat_file_entry, preview_dat_files = create_improved_gui()
+    
+    # Update global references if needed
+    globals()['employee_list_entry'] = employee_list_entry
+    globals()['preview_employee_list'] = preview_employee_list
+    globals()['dat_file_entry'] = dat_file_entry
+    globals()['preview_dat_files'] = preview_dat_files
+    
+    root.mainloop()
