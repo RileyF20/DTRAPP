@@ -13,6 +13,10 @@ import openpyxl
 
 # Global employee list
 employee_list = {}
+history_window_open = False
+history_window = None
+current_employee_file = None
+current_dat_file = None
 
 
 # Global variables
@@ -181,7 +185,7 @@ def convert_batch_to_excel(files):
                     subprocess.run(["start", "", save_path], shell=True)
 
                 # Remove the .dat file from the listbox after successful conversion
-                listbox_txt_files.delete(listbox_txt_files.get(0, tk.END).index(dat_file))  # Remove the file from the listbox
+                employee_list_entry.delete(employee_list_entry.get(0, tk.END).index(dat_file))  # Remove the file from the listbox
 
         except Exception as e:
             messagebox.showerror
@@ -211,7 +215,7 @@ def upload_employee_list():
 
             conn.commit()
             conn.close()
-            listbox_txt_files.insert(tk.END, file_path)  # Show file name in the listbox
+            employee_list_entry.insert(tk.END, file_path)  # Show file name in the listbox
             messagebox.showinfo("Success", "Employee list saved and updated successfully!")
 
         except Exception as e:
@@ -386,7 +390,7 @@ def browse_dat_files():
         return
 
     for file_path in file_paths:
-        listbox_dat_files.insert(tk.END, file_path)  # Add filename to the DAT listbox
+        employee_list_entry.insert(tk.END, file_path)  # Add filename to the DAT listbox
 
 def upload_employee_list():
     global employee_list
@@ -413,18 +417,18 @@ def upload_employee_list():
 
             conn.commit()
             conn.close()
-            listbox_txt_files.insert(tk.END, file_path)  # Show file name in the TXT listbox
+            employee_list_entry.insert(tk.END, file_path)  # Show file name in the TXT listbox
             messagebox.showinfo("Success", "Employee list saved and updated successfully!")
 
         except Exception as e:
             messagebox.showerror("Error", f"Failed to upload employee list: {e}")
 
 def preview_dat_file(event):
-    selected_index = listbox_dat_files.curselection()
+    selected_index = employee_list_entry.curselection()
     if not selected_index:
         return
 
-    file_path = listbox_dat_files.get(selected_index[0])
+    file_path = employee_list_entry.get(selected_index[0])
 
     try:
         df = pd.read_csv(file_path, delimiter="\t", dtype=str)  # Read data file
@@ -471,11 +475,11 @@ def preview_dat_file(event):
         messagebox.showerror("Error", f"Failed to load file: {e}")
 
 def preview_txt_file(event):
-    selected_index = listbox_txt_files.curselection()
+    selected_index = employee_list_entry.curselection()
     if not selected_index:
         return
 
-    file_path = listbox_txt_files.get(selected_index[0])
+    file_path = employee_list_entry.get(selected_index[0])
 
     try:
         with open(file_path, 'r') as file:
@@ -520,7 +524,7 @@ def save_to_database(filename, output_path):
     conn.close()
     
     # Add to Excel listbox
-    listbox_excel_files.insert(tk.END, output_path)
+    employee_list_entry.insert(tk.END, output_path)
 
 def load_excel_history():
     conn = sqlite3.connect("conversion_history.db")
@@ -532,14 +536,14 @@ def load_excel_history():
     # Add existing Excel files to the listbox
     for record in records:
         if os.path.exists(record[0]):  # Only add if the file still exists
-            listbox_excel_files.insert(tk.END, record[0])
+            employee_list_entry.insert(tk.END, record[0])
 
 def open_excel_file(event):
-    selected_index = listbox_excel_files.curselection()
+    selected_index = employee_list_entry.curselection()
     if not selected_index:
         return
 
-    file_path = listbox_excel_files.get(selected_index[0])
+    file_path = employee_list_entry.get(selected_index[0])
     
     if os.path.exists(file_path):
         try:
@@ -549,123 +553,193 @@ def open_excel_file(event):
     else:
         messagebox.showerror("Error", "File not found. It may have been moved or deleted.")
         # Remove entry from listbox if file doesn't exist
-        listbox_excel_files.delete(selected_index)
+        employee_list_entry.delete(selected_index)
 
-def create_gui():
-    global root, listbox_dat_files, listbox_txt_files, listbox_excel_files
+def browse_and_preview_employee_list():
+    file_path = filedialog.askopenfilename(
+        title="Select Employee List TXT File",
+        filetypes=[("Text Files", "*.txt")]
+    )
+
+    if file_path:
+        employee_list_entry.delete(0, tk.END)
+        employee_list_entry.insert(0, file_path)
+
+        preview_employee_list.config(state=tk.NORMAL)
+        preview_employee_list.delete(1.0, tk.END)
+        
+        try:
+            with open(file_path, 'r') as file:
+                content = file.read()
+                preview_employee_list.insert(tk.END, content)
+        except Exception as e:
+            preview_employee_list.insert(tk.END, f"Error reading file: {e}")
+        
+        preview_employee_list.config(state=tk.DISABLED)
+
+def browse_and_preview_dat_files():
+    files = filedialog.askopenfilenames(
+        title="Select DAT Files",
+        filetypes=[("DAT Files", "*.dat")]
+    )
+
+    if files:
+        dat_file_entry.delete(0, tk.END)
+        dat_file_entry.insert(0, ", ".join(files))
+
+        preview_dat_files.config(state=tk.NORMAL)
+        preview_dat_files.delete(1.0, tk.END)
+        
+        for file_path in files:
+            try:
+                with open(file_path, 'r') as file:
+                    content = file.read()
+                    preview_dat_files.insert(tk.END, f"File: {os.path.basename(file_path)}\n")
+                    preview_dat_files.insert(tk.END, content + "\n\n")
+            except Exception as e:
+                preview_dat_files.insert(tk.END, f"Error reading {file_path}: {e}\n\n")
+        
+        preview_dat_files.config(state=tk.DISABLED)
+
+def convert_files():
+    employee_file = employee_list_entry.get()
+    dat_files = dat_file_entry.get().split(", ")
+
+    if not employee_file or not dat_files:
+        messagebox.showwarning("Warning", "Please upload both Employee List and DAT Files")
+        return
+
+    try:
+        # Update employee list first
+        upload_employee_list_from_path(employee_file)
+
+        # Convert DAT files
+        convert_batch_to_excel(dat_files)
+
+    except Exception as e:
+        messagebox.showerror("Error", str(e))
+
+def upload_employee_list_from_path(file_path):
+    global employee_list
+    try:
+        conn = sqlite3.connect("conversion_history.db")
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM employees")  # Clear existing list
+
+        with open(file_path, 'r') as file:
+            employee_list.clear()
+            for line in file:
+                parts = line.strip().split(' ', 1)
+                if len(parts) == 2:
+                    emp_id = int(parts[0])
+                    emp_name = parts[1].strip().upper()
+                    employee_list[emp_id] = emp_name
+                    cursor.execute("INSERT INTO employees (id, name) VALUES (?, ?)", (emp_id, emp_name))
+
+        conn.commit()
+        conn.close()
+        messagebox.showinfo("Success", "Employee list updated successfully!")
+
+    except Exception as e:
+        messagebox.showerror("Error", f"Failed to upload employee list: {e}")
+
+def create_improved_gui():
+    global root, employee_list_entry, dat_file_entry, preview_employee_list, preview_dat_files
+
     root = tk.Tk()
-    root.title("DAT to Excel Converter")
-    root.geometry("700x600")
-    root.configure(bg="#f5f5f5")
-    root.resizable(True, True)
+    root.title("Employee DTR Converter")
+    root.geometry("800x700")
+    root.configure(bg="#f0f0f0")
 
-    label = tk.Label(root, text="Convert DAT to Excel", font=("Segoe UI", 18, "bold"), bg="#f5f5f5", fg="#333")
-    label.pack(pady=10)
+    # Main Container
+    main_container = tk.Frame(root, bg="#f0f0f0", padx=20, pady=20)
+    main_container.pack(fill=tk.BOTH, expand=True)
 
-    # Buttons Frame
-    button_frame = tk.Frame(root, bg="#f5f5f5")
-    button_frame.pack(pady=5)
+    # Title
+    title_label = tk.Label(main_container, text="Employee DTR Converter", 
+                            font=("Segoe UI", 15, "bold"), bg="#f0f0f0", fg="#333")
+    title_label.pack(pady=(0, 10))
 
-    button = tk.Button(button_frame, text="Select .dat Files", command=browse_dat_files, font=("Segoe UI", 12, "bold"), 
-                       fg="white", bg="#4CAF50", relief="flat", padx=20, pady=10, cursor="hand2")
-    button.grid(row=0, column=0, padx=5)
+    # Employee List Section
+    employee_section = tk.LabelFrame(main_container, text="Employee List", 
+                                     font=("Segoe UI", 12, "bold"), bg="#f0f0f0")
+    employee_section.pack(fill=tk.X, pady=10)
 
-    upload_button = tk.Button(button_frame, text="Upload Employee List", command=upload_employee_list, font=("Segoe UI", 12, "bold"), 
-                              fg="white", bg="#CF9FFF", relief="flat", padx=20, pady=10, cursor="hand2")
-    upload_button.grid(row=0, column=1, padx=5)
+    employee_row = tk.Frame(employee_section, bg="#f0f0f0")
+    employee_row.pack(padx=10, pady=10, fill=tk.X)
 
-    history_button = tk.Button(button_frame, text="View History", command=show_history, font=("Segoe UI", 12, "bold"), 
-                               fg="white", bg="#2196F3", relief="flat", padx=20, pady=10, cursor="hand2")
-    history_button.grid(row=0, column=2, padx=5)
+    employee_list_label = tk.Label(employee_row, text="Employee List File:", 
+                                   font=("Segoe UI", 10), bg="#f0f0f0")
+    employee_list_label.pack(side=tk.LEFT, padx=(0, 10))
 
-    # Create notebook for tabbed interface
-    notebook = ttk.Notebook(root)
-    notebook.pack(padx=10, pady=10, fill="both", expand=True)
+    employee_list_entry = tk.Entry(employee_row, font=("Segoe UI", 10), width=50)
+    employee_list_entry.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(0, 10))
 
-    # DAT Files Tab
-    dat_frame = tk.Frame(notebook, bg="#f5f5f5")
-    notebook.add(dat_frame, text="DAT Files")
-    
-    # Label for DAT files
-    tk.Label(dat_frame, text="DAT Files to Convert", font=("Segoe UI", 12, "bold"), bg="#f5f5f5").pack(pady=5)
-    
-    # Frame for DAT Listbox and Scrollbar
-    dat_listbox_frame = tk.Frame(dat_frame, bg="#f5f5f5")
-    dat_listbox_frame.pack(padx=10, pady=5, fill="both", expand=True)
-    
-    # Scrollbar for the DAT Listbox
-    dat_scrollbar = tk.Scrollbar(dat_listbox_frame, orient="vertical")
-    
-    # DAT Listbox
-    listbox_dat_files = tk.Listbox(dat_listbox_frame, height=8, font=("Segoe UI", 12), 
-                              selectbackground="#D3D3D3", relief="solid", bd=1, 
-                              highlightthickness=1, highlightcolor="#4CAF50", yscrollcommand=dat_scrollbar.set)
-    listbox_dat_files.pack(side="left", fill="both", expand=True)
-    
-    dat_scrollbar.config(command=listbox_dat_files.yview)
-    dat_scrollbar.pack(side="right", fill="y")
-    
-    # Bind double-click event to open preview for DAT files
-    listbox_dat_files.bind("<Double-Button-1>", preview_dat_file)
+    employee_upload_btn = tk.Button(employee_row, text="Browse", 
+                                    command=lambda: browse_and_preview_employee_list(),
+                                    font=("Segoe UI", 10), bg="#4CAF50", fg="white")
+    employee_upload_btn.pack(side=tk.LEFT)
 
-    # Employee List Tab
-    txt_frame = tk.Frame(notebook, bg="#f5f5f5")
-    notebook.add(txt_frame, text="Employee Lists")
-    
-    # Label for TXT files
-    tk.Label(txt_frame, text="Uploaded Employee Lists", font=("Segoe UI", 12, "bold"), bg="#f5f5f5").pack(pady=5)
-    
-    # Frame for TXT Listbox and Scrollbar
-    txt_listbox_frame = tk.Frame(txt_frame, bg="#f5f5f5")
-    txt_listbox_frame.pack(padx=10, pady=5, fill="both", expand=True)
-    
-    # Scrollbar for the TXT Listbox
-    txt_scrollbar = tk.Scrollbar(txt_listbox_frame, orient="vertical")
-    
-    # TXT Listbox
-    listbox_txt_files = tk.Listbox(txt_listbox_frame, height=8, font=("Segoe UI", 12), 
-                              selectbackground="#D3D3D3", relief="solid", bd=1, 
-                              highlightthickness=1, highlightcolor="#CF9FFF", yscrollcommand=txt_scrollbar.set)
-    listbox_txt_files.pack(side="left", fill="both", expand=True)
-    
-    txt_scrollbar.config(command=listbox_txt_files.yview)
-    txt_scrollbar.pack(side="right", fill="y")
-    
-    # Bind double-click event to open preview for TXT files
-    listbox_txt_files.bind("<Double-Button-1>", preview_txt_file)
+    # Employee List Preview
+    preview_employee_list = tk.Text(employee_section, height=5, font=("Courier", 10), 
+                                    state=tk.DISABLED, wrap=tk.NONE)
+    preview_employee_list.pack(padx=10, pady=10, fill=tk.X)
 
-    # Excel Output Tab
-    excel_frame = tk.Frame(notebook, bg="#f5f5f5")
-    notebook.add(excel_frame, text="Excel Outputs")
-    
-    # Label for Excel files
-    tk.Label(excel_frame, text="Converted Excel Files", font=("Segoe UI", 12, "bold"), bg="#f5f5f5").pack(pady=5)
-    
-    # Frame for Excel Listbox and Scrollbar
-    excel_listbox_frame = tk.Frame(excel_frame, bg="#f5f5f5")
-    excel_listbox_frame.pack(padx=10, pady=5, fill="both", expand=True)
-    
-    # Scrollbar for the Excel Listbox
-    excel_scrollbar = tk.Scrollbar(excel_listbox_frame, orient="vertical")
-    
-    # Excel Listbox
-    listbox_excel_files = tk.Listbox(excel_listbox_frame, height=8, font=("Segoe UI", 12), 
-                                selectbackground="#D3D3D3", relief="solid", bd=1, 
-                                highlightthickness=1, highlightcolor="#2196F3", yscrollcommand=excel_scrollbar.set)
-    listbox_excel_files.pack(side="left", fill="both", expand=True)
-    
-    excel_scrollbar.config(command=listbox_excel_files.yview)
-    excel_scrollbar.pack(side="right", fill="y")
-    
-    # Bind double-click event to open Excel files
-    listbox_excel_files.bind("<Double-Button-1>", open_excel_file)
-    
-    # Load any existing conversion history
-    load_excel_history()
+    # DAT Files Section
+    dat_section = tk.LabelFrame(main_container, text="DTR Files", 
+                                font=("Segoe UI", 12, "bold"), bg="#f0f0f0")
+    dat_section.pack(fill=tk.X, pady=10)
+
+    dat_row = tk.Frame(dat_section, bg="#f0f0f0")
+    dat_row.pack(padx=10, pady=10, fill=tk.X)
+
+    dat_file_label = tk.Label(dat_row, text="DTR Files:", 
+                              font=("Segoe UI", 10), bg="#f0f0f0")
+    dat_file_label.pack(side=tk.LEFT, padx=(0, 10))
+
+    dat_file_entry = tk.Entry(dat_row, font=("Segoe UI", 10), width=50)
+    dat_file_entry.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(0, 10))
+
+    dat_upload_btn = tk.Button(dat_row, text="Browse", 
+                               command=lambda: browse_and_preview_dat_files(),
+                               font=("Segoe UI", 10), bg="#2196F3", fg="white")
+    dat_upload_btn.pack(side=tk.LEFT)
+
+    # DAT Files Preview
+    preview_dat_files = tk.Text(dat_section, height=10, font=("Courier", 10), 
+                                state=tk.DISABLED, wrap=tk.NONE)
+    preview_dat_files.pack(padx=10, pady=10, fill=tk.X)
+
+    # History Button
+    history_btn = tk.Button(main_container, text="View Conversion History", 
+                            command=show_history, 
+                            font=("Segoe UI", 12), 
+                            bg="#9C27B0", fg="white")
+    history_btn.pack(pady=2)
+
+    # Conversion Button
+    convert_btn = tk.Button(main_container, text="Convert DTR to Excel", 
+                            command=convert_files, 
+                            font=("Segoe UI", 12, "bold"), 
+                            bg="#FF9800", fg="white")
+    convert_btn.pack(pady=2, padx=20)
+
+    # Scroll bars for previews
+    employee_preview_scrollbar_x = tk.Scrollbar(employee_section, orient=tk.HORIZONTAL, 
+                                                command=preview_employee_list.xview)
+    employee_preview_scrollbar_x.pack(fill=tk.X, padx=3)
+    preview_employee_list.configure(xscrollcommand=employee_preview_scrollbar_x.set)
+
+    dat_preview_scrollbar_x = tk.Scrollbar(dat_section, orient=tk.HORIZONTAL, 
+                                           command=preview_dat_files.xview)
+    dat_preview_scrollbar_x.pack(fill=tk.X, padx=10)
+    preview_dat_files.configure(xscrollcommand=dat_preview_scrollbar_x.set)
 
     root.mainloop()
 
+# Replace the original create_gui() function with this new one
+# Modify the main block
 if __name__ == "__main__":
     create_database()
     load_employee_list()  # Load employee list from DB if any
-    create_gui()
+    create_improved_gui()
