@@ -181,6 +181,11 @@ def format_dtr_summary_sheet(writer, df, month_year):
                 # Center align the time cells
                 am_cell.alignment = Alignment(horizontal='center')
                 pm_cell.alignment = Alignment(horizontal='center')
+    
+    # Create frozen panes to keep headers and ID/Name columns visible when scrolling
+    # Freeze panes at cell C6 (row 6, column 3)
+    # This freezes rows 1-5 and columns A-B
+    worksheet.freeze_panes = 'C6'
 
 def filter_in_out_entries(df):
     # Keep your original function mostly intact
