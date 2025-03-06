@@ -57,8 +57,133 @@ def save_to_database(filename, output_path):
     conn.commit()
     conn.close()
 
-def filter_in_out_entries(df):
+def format_dtr_summary_sheet(writer, df, month_year):
+    """
+    Formats the DTR summary sheet to match the layout in the example image
+    while using the existing data processed by filter_in_out_entries
+    """
+    sheet_name = f"DTR - {month_year}"
+    worksheet = writer.sheets[sheet_name]
+    
+    # Add title
+    worksheet['A1'] = f"DAILY TIME RECORD SUMMARY - {month_year.upper()}"
+    worksheet['A1'].font = Font(size=14, bold=True)
+    worksheet.merge_cells('A1:E1')
+    
+    # Get all date columns from the existing data
+    date_columns = [col for col in df.columns if "Time In" in col or "Time Out" in col]
+    unique_dates = sorted(set([col.split(" (")[0] for col in date_columns if " (" in col]))
+    
+    # Starting row and column for the ID and NAME headers
+    header_row = 3
+    start_col = 3  # Column C (after ID and Name)
+    
+    # Add ID and NAME headers
+    worksheet.cell(row=header_row, column=1, value="ID")
+    worksheet.cell(row=header_row, column=2, value="NAME")
+    
+    # Bold and center these headers
+    for col in range(1, 3):
+        header_cell = worksheet.cell(row=header_row, column=col)
+        header_cell.font = Font(bold=True)
+        header_cell.alignment = Alignment(horizontal='center')
+    
+    # Add date headers
+    for i, date_str in enumerate(unique_dates):
+        date = datetime.strptime(date_str, '%Y-%m-%d')
+        # Date column
+        date_col = start_col + i*2
+        day_name = date.strftime('%a').upper()
+        formatted_date = date.strftime('%d/%m/%Y')
+        
+        # Date cell
+        worksheet.cell(row=header_row, column=date_col, value=formatted_date)
+        worksheet.merge_cells(start_row=header_row, start_column=date_col, 
+                             end_row=header_row, end_column=date_col+1)
+        
+        date_cell = worksheet.cell(row=header_row, column=date_col)
+        date_cell.font = Font(bold=True)
+        date_cell.alignment = Alignment(horizontal='center')
+        
+        # Day name cell - row 4 (header_row + 1)
+        day_row = header_row + 1
+        worksheet.cell(row=day_row, column=date_col, value=day_name)
+        worksheet.merge_cells(start_row=day_row, start_column=date_col, 
+                             end_row=day_row, end_column=date_col+1)
+        
+        day_cell = worksheet.cell(row=day_row, column=date_col)
+        day_cell.font = Font(bold=True)
+        day_cell.alignment = Alignment(horizontal='center')
+        
+        # Clear any ID/NAME data in the day row (row 4)
+        worksheet.cell(row=day_row, column=1, value="")
+        worksheet.cell(row=day_row, column=2, value="")
+        
+        # AM/PM headers - row 5 (header_row + 2)
+        am_pm_row = header_row + 2
+        worksheet.cell(row=am_pm_row, column=date_col, value="AM")
+        worksheet.cell(row=am_pm_row, column=date_col+1, value="PM")
+        
+        # Style AM/PM headers
+        am_cell = worksheet.cell(row=am_pm_row, column=date_col)
+        pm_cell = worksheet.cell(row=am_pm_row, column=date_col+1)
+        am_cell.font = Font(bold=True)
+        pm_cell.font = Font(bold=True)
+        am_cell.alignment = Alignment(horizontal='center')
+        pm_cell.alignment = Alignment(horizontal='center')
+        
+        # Clear any ID/NAME data in the AM/PM row (row 5)
+        worksheet.cell(row=am_pm_row, column=1, value="")
+        worksheet.cell(row=am_pm_row, column=2, value="")
+    
+    # Clear any existing data and write employee data starting from row 6
+    employee_start_row = header_row + 3  # This is row 6 in the worksheet
+    
+    # Clear rows that might have data from to_excel
+    for row in range(employee_start_row, worksheet.max_row + 1):
+        for col in range(1, worksheet.max_column + 1):
+            worksheet.cell(row=row, column=col).value = None
+    
+    # Write employee data
+    for i, row in df.iterrows():
+        # Write ID and Name
+        worksheet.cell(row=employee_start_row + i, column=1, value=row['Employee No.'])
+        worksheet.cell(row=employee_start_row + i, column=2, value=row[df.columns[1]])  # Assuming Name is the second column
+        
+        # Format ID and NAME cells
+        id_cell = worksheet.cell(row=employee_start_row + i, column=1)
+        name_cell = worksheet.cell(row=employee_start_row + i, column=2)
+        id_cell.alignment = Alignment(horizontal='center')
+        name_cell.alignment = Alignment(horizontal='left')
+        
+        # Write time entries
+        for date_idx, date_str in enumerate(unique_dates):
+            # Find the corresponding columns in the DataFrame
+            am_col = next((col for col in df.columns if date_str in col and "Time In" in col), None)
+            pm_col = next((col for col in df.columns if date_str in col and "Time Out" in col), None)
+            
+            if am_col and pm_col:
+                am_value = row[am_col]
+                pm_value = row[pm_col]
+                
+                # Write values
+                am_cell = worksheet.cell(row=employee_start_row + i, column=start_col + date_idx*2)
+                pm_cell = worksheet.cell(row=employee_start_row + i, column=start_col + date_idx*2 + 1)
+                
+                am_cell.value = am_value
+                pm_cell.value = pm_value
+                
+                # Format special values
+                for cell_value, cell in [(am_value, am_cell), (pm_value, pm_cell)]:
+                    if isinstance(cell_value, str) and cell_value.upper() in ["SATURDAY", "SUNDAY", "ABSENT"]:
+                        cell.value = cell_value.upper()
+                
+                # Center align the time cells
+                am_cell.alignment = Alignment(horizontal='center')
+                pm_cell.alignment = Alignment(horizontal='center')
 
+def filter_in_out_entries(df):
+    # Keep your original function mostly intact
     # Validate input DataFrame
     if df.shape[1] < 2:
         return df  # Return original if insufficient columns
@@ -75,6 +200,12 @@ def filter_in_out_entries(df):
 
     # Group logs by employee and date
     grouped = df.groupby([first_col, 'Date'])['Time'].agg(list).reset_index()
+    
+    # Add Hours column for processing
+    grouped['Hours'] = grouped.apply(
+        lambda row: df[(df[first_col] == row[first_col]) & (df['Date'] == row['Date'])]['Hour'].tolist(),
+        axis=1
+    )
     
     # Determine time-in and time-out logs
     def process_daily_logs(times, hours):
@@ -94,27 +225,33 @@ def filter_in_out_entries(df):
 
     # Apply log processing
     grouped[['Time In', 'Time Out']] = grouped.apply(
-        lambda row: pd.Series(process_daily_logs(row['Time'], 
-            df[(df[first_col] == row[first_col]) & (df['Date'] == row['Date'])]['Hour'])), 
+        lambda row: pd.Series(process_daily_logs(row['Time'], row['Hours'])), 
         axis=1
     )
-    grouped = grouped.drop(columns=['Time'])
+    grouped = grouped.drop(columns=['Time', 'Hours'])
 
     # Generate full date range for the month
     if not df.empty:
-        last_recorded_date = df[time_col].max().strftime('%Y-%m-%d')
-        year, month = df[time_col].min().year, df[time_col].min().month
+        min_date = pd.to_datetime(df['Date'].min())
+        max_date = pd.to_datetime(df['Date'].max())
+        
+        # Get first and last day of the month
+        year, month = min_date.year, min_date.month
         first_day = datetime(year, month, 1)
-        last_day = (first_day.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
+        if month == 12:
+            last_day = datetime(year + 1, 1, 1) - timedelta(days=1)
+        else:
+            last_day = datetime(year, month + 1, 1) - timedelta(days=1)
+        
         all_dates = pd.date_range(first_day, last_day).strftime('%Y-%m-%d')
 
         # Create full index for all employees and dates
-        all_employees = grouped[first_col].unique()
+        all_employees = df[first_col].unique()
         full_index = pd.MultiIndex.from_product([all_employees, all_dates], names=[first_col, 'Date'])
         grouped = grouped.set_index([first_col, 'Date']).reindex(full_index).reset_index()
 
     # Determine day of the week
-    grouped['DayOfWeek'] = grouped['Date'].apply(lambda x: datetime.strptime(x, '%Y-%m-%d').strftime('%A'))
+    grouped['DayOfWeek'] = grouped['Date'].apply(lambda x: pd.to_datetime(x).strftime('%A'))
 
     # Mark absences and weekend days
     def mark_absences(row):
@@ -123,28 +260,28 @@ def filter_in_out_entries(df):
                 return "Saturday", "Saturday"
             elif row['DayOfWeek'] == 'Sunday':
                 return "Sunday", "Sunday"
-            elif row['Date'] <= last_recorded_date:
+            else:
                 return "Absent", "Absent"
         return row['Time In'], row['Time Out']
 
     grouped[['Time In', 'Time Out']] = grouped.apply(mark_absences, axis=1, result_type="expand")
 
-    # Fill NaN values
-    grouped.fillna('', inplace=True)
-
     # Add Employee No. mapping (assuming employee_list is defined elsewhere)
     name_to_id = {v: k for k, v in employee_list.items()}
-    grouped['Employee No.'] = grouped['Name'].map(name_to_id)
+    grouped['Employee No.'] = grouped[first_col].map(name_to_id)
+
+    # For float columns, fill with 0.0 or another appropriate numeric value
+    grouped.fillna({col: 0.0 for col in grouped.select_dtypes(include=['float64']).columns}, inplace=True)
+    # For string columns, fill with empty string
+    grouped.fillna({col: '' for col in grouped.select_dtypes(include=['object']).columns}, inplace=True)
 
     # Pivot and format results
-    result = grouped.pivot(index=['Employee No.', 'Name'], columns='Date', values=['Time In', 'Time Out'])
+    result = grouped.pivot(index=['Employee No.', first_col], columns='Date', values=['Time In', 'Time Out'])
     result = result.swaplevel(axis=1).sort_index(axis=1, level=0)
     result.columns = [f"{date} ({datetime.strptime(date, '%Y-%m-%d').strftime('%A')}) {status}" 
                       for date, status in result.columns]
 
     return result.reset_index().sort_values(by="Employee No.").reset_index(drop=True)
-
-import openpyxl
 
 def convert_batch_to_excel(files):
     for dat_file in files:
@@ -160,7 +297,7 @@ def convert_batch_to_excel(files):
                 return
 
             df.columns = ["Name", "Timestamp"] + [f"Col_{i}" for i in range(2, df.shape[1])]
-            df["Name"] = df["Name"].map(lambda x: employee_list.get(int(x), str(x)))
+            df["Name"] = df["Name"].map(lambda x: employee_list.get(int(float(x)) if isinstance(x, (int, float, str)) and str(x).replace('.', '', 1).isdigit() else x, str(x)))
 
             df["Timestamp"] = pd.to_datetime(df["Timestamp"], errors="coerce")
             df = df.dropna(subset=["Timestamp"])  # Remove invalid timestamps
@@ -193,12 +330,9 @@ def convert_batch_to_excel(files):
                 with pd.ExcelWriter(save_path, engine="openpyxl") as writer:
                     # Write the attendance sheet with a month-based name
                     final_df.to_excel(writer, sheet_name=sheet_name, index=False, startrow=2)
-
-                    # Auto-adjust column widths
-                    writer.book[sheet_name]["A1"] = month_year  # Set month-year as title
-                    writer.book[sheet_name]["A1"].font = Font(size=14, bold=True)
-                    writer.book[sheet_name]["A1"].alignment = Alignment(horizontal="center")
-                    writer.book[sheet_name].merge_cells('A1:E1')  # Merge across columns for better visibility
+                    
+                    # Format the summary sheet to match the desired layout
+                    format_dtr_summary_sheet(writer, final_df, month_year)
 
                     # Generate individual employee DTR sheets
                     for name in df["Name"].unique():
@@ -213,13 +347,8 @@ def convert_batch_to_excel(files):
                 if open_file:
                     subprocess.run(["start", "", save_path], shell=True)
 
-                # Remove the .dat file from the listbox after successful conversion
-                employee_list_entry.delete(employee_list_entry.get(0, tk.END).index(dat_file))  # Remove the file from the listbox
-
         except Exception as e:
-            messagebox.showerror
-        except Exception as e:
-            messagebox.showerror
+            messagebox.showerror("Error", f"Failed to convert file: {str(e)}")
 
 def upload_employee_list():
     global employee_list
