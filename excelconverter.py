@@ -261,9 +261,7 @@ def load_employee_list():
     employee_list = {emp_id: name for emp_id, name in rows}
     conn.close()
 
-
 def generate_employee_dtr(writer, df, employee_name):
-    
     # Filter data for specific employee
     employee_df = df[df["Name"] == employee_name].copy()
     if employee_df.empty:
@@ -272,111 +270,667 @@ def generate_employee_dtr(writer, df, employee_name):
     # Generate date range for the month
     first_date = employee_df["Timestamp"].min().date()
     year, month = first_date.year, first_date.month
+    month_name = first_date.strftime('%B')
     first_day = datetime(year, month, 1)
     last_day = (first_day.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
     all_dates = pd.date_range(first_day, last_day).date
-
-    # Prepare full date range DataFrame
-    date_df = pd.DataFrame({"Date": all_dates})
-    date_df["Weekday"] = date_df["Date"].apply(lambda x: x.strftime('%A'))
-
+    
+    # Create the workbook
+    worksheet = writer.book.create_sheet(employee_name)
+    
+    # --- Header Section ---
+    # Create Civil Service form header
+    worksheet.merge_cells('A1:E1')
+    worksheet.merge_cells('I1:M1')
+    cell = worksheet['A1']
+    cell.value = "Civil Service Form No. 48"
+    cell.alignment = Alignment(horizontal='center')
+    
+    cell = worksheet['I1']
+    cell.value = "Civil Service Form No. 48"
+    cell.alignment = Alignment(horizontal='center')
+    
+    # Create DAILY TIME RECORD header
+    worksheet.merge_cells('A2:E2')
+    worksheet.merge_cells('I2:M2')
+    cell = worksheet['A2']
+    cell.value = "DAILY TIME RECORD"
+    cell.alignment = Alignment(horizontal='center')
+    cell.font = Font(bold=True)
+    
+    cell = worksheet['I2']
+    cell.value = "DAILY TIME RECORD"
+    cell.alignment = Alignment(horizontal='center')
+    cell.font = Font(bold=True)
+    
+    # Add Employee Name (bold, centered, and underlined) above "NAME"
+    worksheet.merge_cells('A3:E3')
+    worksheet.merge_cells('I3:M3')
+    cell = worksheet['A3']
+    cell.value = employee_name.upper()
+    cell.alignment = Alignment(horizontal='center')
+    cell.font = Font(bold=True, underline='single')  # Add underline
+    
+    cell = worksheet['I3']
+    cell.value = employee_name.upper()
+    cell.alignment = Alignment(horizontal='center')
+    cell.font = Font(bold=True, underline='single')  # Add underline
+    
+    # Add NAME label
+    worksheet.merge_cells('A4:E4')
+    worksheet.merge_cells('I4:M4')
+    cell = worksheet['A4']
+    cell.value = "NAME"
+    cell.alignment = Alignment(horizontal='center')
+    
+    cell = worksheet['I4']
+    cell.value = "NAME"
+    cell.alignment = Alignment(horizontal='center')
+    
+    # Add spacing row between NAME and "For the month of"
+    worksheet.row_dimensions[5].height = 15  # Add space between NAME and month info
+    
+    # --- Month and Hours Section ---
+    # Add month info (moved to row 6 instead of 5)
+    month_range = f"{month_name} 1-{last_day.day}, {year}"
+    
+    worksheet.merge_cells('A6:E6')  # Changed from A5:E5 to A6:E6
+    cell = worksheet['A6']  # Changed from A5 to A6
+    cell.value = f"For the month of      {month_range}"
+    
+    worksheet.merge_cells('I6:M6')  # Changed from I5:M5 to I6:M6
+    cell = worksheet['I6']  # Changed from I5 to I6
+    cell.value = f"For the month of      {month_range}"
+    
+    # Add official hours info (adjust row numbers)
+    worksheet.merge_cells('A7:E7')  # Changed from A6:E6 to A7:E7
+    cell = worksheet['A7']  # Changed from A6 to A7
+    cell.value = "Official hours for arrival and departure:"
+    
+    worksheet.merge_cells('I7:M7')  # Changed from I6:M6 to I7:M7
+    cell = worksheet['I7']  # Changed from I6 to I7
+    cell.value = "Official hours for arrival and departure:"
+    
     # Extract and process time logs
     employee_df["Date"] = employee_df["Timestamp"].dt.date
     employee_df["Hour"] = employee_df["Timestamp"].dt.hour
-    employee_df["Time"] = employee_df["Timestamp"].dt.strftime("%H:%M:%S")
-
-    # Group and process logs with more sophisticated time-in/out logic
-    def process_daily_logs(group):
-        # Sort logs by hour to ensure correct time-in and time-out
-        sorted_logs = group.sort_values("Hour")
+    employee_df["Time"] = employee_df["Timestamp"].dt.strftime("%H:%M")
+    
+    # Create a calendar dictionary with default values
+    calendar_data = {}
+    
+    # Fill in logs with default values
+    for i, date in enumerate(all_dates, 1):
+        date_str = date.strftime('%Y-%m-%d')
+        weekday = date.weekday()
         
-        # Determine time-in and time-out
-        if len(sorted_logs) == 1:
-            # Single log handling
-            log = sorted_logs.iloc[0]
-            if log["Hour"] < 12:
-                return pd.Series({
-                    "Arrival": log["Time"],
-                    "Departure": "No Out",
-                    "Undertime": ""
-                })
-            else:
-                return pd.Series({
-                    "Arrival": "No In",
-                    "Departure": log["Time"],
-                    "Undertime": ""
-                })
+        # Default values
+        if weekday == 5:  # Saturday
+            calendar_data[i] = {
+                'date': date,
+                'arrival': '',
+                'departure': '',
+                'lunch_out': '',
+                'lunch_in': '',
+                'special': 'SATURDAY',
+                'undertime': ''  # Add undertime field
+            }
+        elif weekday == 6:  # Sunday
+            calendar_data[i] = {
+                'date': date,
+                'arrival': '',
+                'departure': '',
+                'lunch_out': '',
+                'lunch_in': '',
+                'special': 'SUNDAY',
+                'undertime': ''  # Add undertime field
+            }
         else:
-            # Multiple logs
-            first_log = sorted_logs.iloc[0]
-            last_log = sorted_logs.iloc[-1]
+            calendar_data[i] = {
+                'date': date,
+                'arrival': '',
+                'departure': '',
+                'lunch_out': '',
+                'lunch_in': '',
+                'special': 'ABSENT',  # Default to ABSENT for weekdays with no logs
+                'undertime': ''  # Add undertime field
+            }
+    
+    # Override with actual logs
+    # Group logs by date
+    logs_by_date = {}
+    for _, row in employee_df.iterrows():
+        date = row["Date"]
+        day = date.day
+        time = row["Time"]
+        hour = row["Hour"]
+        
+        if day not in logs_by_date:
+            logs_by_date[day] = []
+        
+        logs_by_date[day].append((time, hour))
+    
+    # Function to calculate undertime
+    def calculate_undertime(arrival, departure, lunch_out, lunch_in):
+        # Skip calculation if any time is missing
+        if not arrival or not departure or not lunch_out or not lunch_in:
+            return ""
+        
+        # If "No In" or "No Out" appears, return empty string
+        if arrival == "No In" or departure == "No Out":
+            return ""
+        
+        try:
+            # Parse time strings to datetime objects
+            arrival_time = datetime.strptime(arrival, "%H:%M")
+            departure_time = datetime.strptime(departure, "%H:%M")
+            lunch_out_time = datetime.strptime(lunch_out, "%H:%M")
+            lunch_in_time = datetime.strptime(lunch_in, "%H:%M")
             
-            # Calculate work duration
-            first_datetime = pd.to_datetime(first_log["Time"], format="%H:%M:%S")
-            last_datetime = pd.to_datetime(last_log["Time"], format="%H:%M:%S")
-            work_duration = (last_datetime - first_datetime).seconds / 3600
+            # Standard work hours (9 hours including 1 hour lunch)
+            std_arrival = datetime.strptime("08:00", "%H:%M")
+            std_departure = datetime.strptime("17:00", "%H:%M")
             
-            return pd.Series({
-                "Arrival": first_log["Time"],
-                "Departure": last_log["Time"],
-                "Undertime": "Undertime" if work_duration < 8 else ""
-            })
-
-    # Group and process logs
-    grouped = employee_df.groupby("Date").apply(process_daily_logs).reset_index()
-
-    # Merge full date range with processed logs
-    final_df = pd.merge(date_df, grouped, on="Date", how="left")
-
-    # Fill missing entries for weekends and absences
-    def fill_missing(row):
-        if pd.isnull(row["Arrival"]):
-            if row["Weekday"] == "Saturday":
-                row["Arrival"] = "Saturday"
-                row["Departure"] = "Saturday"
-                row["Undertime"] = ""
-            elif row["Weekday"] == "Sunday":
-                row["Arrival"] = "Sunday"
-                row["Departure"] = "Sunday"
-                row["Undertime"] = ""
+            # Calculate actual work hours (excluding lunch)
+            lunch_duration = (lunch_in_time - lunch_out_time).total_seconds() / 3600
+            actual_work_hours = ((departure_time - arrival_time).total_seconds() / 3600) - lunch_duration
+            
+            # Standard work hours (excluding 1 hour lunch)
+            standard_work_hours = 8
+            
+            # Calculate undertime in hours
+            undertime_hours = max(0, standard_work_hours - actual_work_hours)
+            
+            # If late arrival or early departure
+            if arrival_time > std_arrival:
+                late_mins = (arrival_time - std_arrival).total_seconds() / 60
+                undertime_hours += late_mins / 60
+                
+            if departure_time < std_departure:
+                early_mins = (std_departure - departure_time).total_seconds() / 60
+                undertime_hours += early_mins / 60
+            
+            # Format as HH:MM
+            hours = int(undertime_hours)
+            minutes = int((undertime_hours - hours) * 60)
+            
+            if hours > 0 or minutes > 0:
+                return f"{hours:02}:{minutes:02}"
             else:
-                row["Arrival"] = "Absent"
-                row["Departure"] = "Absent"
-                row["Undertime"] = ""
-        return row
-
-    final_df = final_df.apply(fill_missing, axis=1)
-
-    # Count Saturdays with actual logs
-    saturday_logs = final_df[(final_df["Weekday"] == "Saturday") & 
-                              (final_df["Arrival"] != "Saturday")].shape[0]
-    final_df.loc[0, "Saturdays"] = saturday_logs
-
-    # Format column order
-    final_df = final_df[["Date", "Weekday", "Arrival", "Departure", "Undertime"]]
-
-    # Write employee sheet
-    final_df.to_excel(writer, sheet_name=employee_name, index=False, startrow=7)
-
-    # Auto-adjust column widths and formatting (keep existing formatting code)
-    worksheet = writer.book[employee_name]
-    worksheet["A1"] = employee_name.upper()
-    worksheet["A1"].font = Font(size=14, bold=True)
-    worksheet["A1"].alignment = Alignment(horizontal="center")
-    worksheet.merge_cells("A1:E1")
-
-    worksheet["A3"] = f"For the month of {first_day.strftime('%B %d')} - {last_day.strftime('%d, %Y')}"
-    worksheet["A4"] = "Official hours for arrival and departure"
-    worksheet["A5"] = "Regular days: 8:00 AM - 5:00 PM"
-    worksheet["A6"] = f"Saturdays: {saturday_logs}"
-
-    for col in worksheet.iter_cols(min_row=8, max_row=worksheet.max_row):
-        max_length = max(len(str(cell.value)) if cell.value else 0 for cell in col)
-        col_letter = get_column_letter(col[0].column)
-        worksheet.column_dimensions[col_letter].width = max_length + 2
-        for cell in col:
-            cell.alignment = Alignment(horizontal="center")
-
+                return ""
+        except:
+            return ""
+    
+    # Process logs for each day
+    for day, logs in logs_by_date.items():
+        if day in calendar_data:
+            # Clear the ABSENT special status if logs exist
+            if calendar_data[day]['special'] == 'ABSENT':
+                calendar_data[day]['special'] = ''
+            
+            # Sort by hour to get earliest and latest
+            logs.sort(key=lambda x: x[1])
+            
+            if len(logs) == 1:
+                # Single log - determine if it's arrival or departure based on time
+                time, hour = logs[0]
+                if hour < 12:  # Morning log
+                    calendar_data[day]['arrival'] = time
+                    calendar_data[day]['departure'] = "No Out"
+                    # Set default lunch break for days with logs
+                    calendar_data[day]['lunch_out'] = "12:01"
+                    calendar_data[day]['lunch_in'] = "12:55"
+                else:  # Afternoon log
+                    calendar_data[day]['arrival'] = "No In"
+                    calendar_data[day]['departure'] = time
+                    # Set default lunch break for days with logs
+                    calendar_data[day]['lunch_out'] = "12:01"
+                    calendar_data[day]['lunch_in'] = "12:55"
+            elif len(logs) >= 2:
+                # Multiple logs - take first and last
+                calendar_data[day]['arrival'] = logs[0][0]
+                calendar_data[day]['departure'] = logs[-1][0]
+                # Set default lunch break for days with logs
+                calendar_data[day]['lunch_out'] = "12:01"
+                calendar_data[day]['lunch_in'] = "12:55"
+            
+            # Calculate undertime (only for regular weekdays)
+            if calendar_data[day]['special'] == '':
+                calendar_data[day]['undertime'] = calculate_undertime(
+                    calendar_data[day]['arrival'],
+                    calendar_data[day]['departure'],
+                    calendar_data[day]['lunch_out'],
+                    calendar_data[day]['lunch_in']
+                )
+    
+    # Count Saturdays with logs
+    saturday_count = sum(1 for i, data in calendar_data.items() 
+                         if data['date'].weekday() == 5 and 
+                         (data['arrival'] or data['departure']))
+    
+    # Add regular days hours (adjust row numbers)
+    worksheet.merge_cells('A8:E8')  # Changed from A7:E7 to A8:E8
+    cell = worksheet['A8']  # Changed from A7 to A8
+    cell.value = "Regular days: 8:00 AM - 5:00 PM"
+    
+    worksheet.merge_cells('I8:M8')  # Changed from I7:M7 to I8:M8
+    cell = worksheet['I8']  # Changed from I7 to I8
+    cell.value = "Regular days: 8:00 AM - 5:00 PM"
+    
+    # Add Saturdays info with count (adjust row numbers)
+    worksheet.merge_cells('A9:E9')  # Changed from A8:E8 to A9:E9
+    cell = worksheet['A9']  # Changed from A8 to A9
+    cell.value = f"Saturdays: {saturday_count} day(s)"
+    
+    worksheet.merge_cells('I9:M9')  # Changed from I8:M8 to I9:M9
+    cell = worksheet['I9']  # Changed from I8 to I9
+    cell.value = f"Saturdays: {saturday_count} day(s)"
+    
+    # --- Table Headers --- (adjust row numbers)
+    # Create table headers - First set
+    worksheet['A10'] = "Day"  # Changed from A9 to A10
+    worksheet['B10'] = "Arrival"  # Changed from B9 to B10
+    worksheet['C10'] = "Departure"  # Changed from C9 to C10
+    worksheet['D10'] = "Arrival"  # Changed from D9 to D10
+    worksheet['E10'] = "Departure"  # Changed from E9 to E10
+    worksheet['F10'] = "Undertime"  # Changed from F9 to F10
+    
+    # Create table headers - Second set
+    worksheet['I10'] = "Day"  # Changed from I9 to I10
+    worksheet['J10'] = "Arrival"  # Changed from J9 to J10
+    worksheet['K10'] = "Departure"  # Changed from K9 to K10
+    worksheet['L10'] = "Arrival"  # Changed from L9 to L10
+    worksheet['M10'] = "Departure"  # Changed from M9 to M10
+    worksheet['N10'] = "Undertime"  # Changed from N9 to N10
+    
+    # Style the headers
+    for col in range(1, 7):
+        col_letter = get_column_letter(col)
+        cell = worksheet[f'{col_letter}10']  # Changed from row 9 to row 10
+        cell.alignment = Alignment(horizontal='center')
+        cell.border = openpyxl.styles.Border(
+            left=openpyxl.styles.Side(border_style='thin'),
+            right=openpyxl.styles.Side(border_style='thin'),
+            top=openpyxl.styles.Side(border_style='thin'),
+            bottom=openpyxl.styles.Side(border_style='thin')
+        )
+    
+    for col in range(9, 15):
+        col_letter = get_column_letter(col)
+        cell = worksheet[f'{col_letter}10']  # Changed from row 9 to row 10
+        cell.alignment = Alignment(horizontal='center')
+        cell.border = openpyxl.styles.Border(
+            left=openpyxl.styles.Side(border_style='thin'),
+            right=openpyxl.styles.Side(border_style='thin'),
+            top=openpyxl.styles.Side(border_style='thin'),
+            bottom=openpyxl.styles.Side(border_style='thin')
+        )
+    
+    # Fill the table with the calendar data
+    row_start = 11  # Changed from 10 to 11
+    total_undertime_mins = 0
+    
+    for day, data in calendar_data.items():
+        if day <= 31:  # Ensure we don't go beyond the maximum days
+            # Day number cell
+            cell = worksheet[f'A{row_start}']
+            cell.value = day
+            cell.alignment = Alignment(horizontal='center')
+            
+            # For Saturday/Sunday, still show time if available
+            if data['special'] in ['SATURDAY', 'SUNDAY']:
+                if data['arrival'] or data['departure']:
+                    # If they have logs, show them
+                    cell = worksheet[f'B{row_start}']
+                    cell.value = data['arrival'] if data['arrival'] else ''
+                    cell.alignment = Alignment(horizontal='center')
+                    
+                    cell = worksheet[f'C{row_start}']
+                    cell.value = data['lunch_out'] if data['lunch_out'] else ''
+                    cell.alignment = Alignment(horizontal='center')
+                    
+                    cell = worksheet[f'D{row_start}']
+                    cell.value = data['lunch_in'] if data['lunch_in'] else ''
+                    cell.alignment = Alignment(horizontal='center')
+                    
+                    cell = worksheet[f'E{row_start}']
+                    cell.value = data['departure'] if data['departure'] else ''
+                    cell.alignment = Alignment(horizontal='center')
+                    
+                    cell = worksheet[f'F{row_start}']
+                    cell.value = ''  # No undertime for weekends
+                    cell.alignment = Alignment(horizontal='center')
+                else:
+                    # No logs, just show the day type
+                    worksheet.merge_cells(f'B{row_start}:F{row_start}')
+                    cell = worksheet[f'B{row_start}']
+                    cell.value = data['special']
+                    cell.alignment = Alignment(horizontal='center')
+            elif data['special'] == 'ABSENT':
+                # For absent days
+                worksheet.merge_cells(f'B{row_start}:F{row_start}')
+                cell = worksheet[f'B{row_start}']
+                cell.value = 'ABSENT'
+                cell.alignment = Alignment(horizontal='center')
+            else:
+                # Regular day with time entries
+                cell = worksheet[f'B{row_start}']
+                cell.value = data['arrival']
+                cell.alignment = Alignment(horizontal='center')
+                
+                cell = worksheet[f'C{row_start}']
+                cell.value = data['lunch_out']
+                cell.alignment = Alignment(horizontal='center')
+                
+                cell = worksheet[f'D{row_start}']
+                cell.value = data['lunch_in']
+                cell.alignment = Alignment(horizontal='center')
+                
+                cell = worksheet[f'E{row_start}']
+                cell.value = data['departure']
+                cell.alignment = Alignment(horizontal='center')
+                
+                cell = worksheet[f'F{row_start}']
+                cell.value = data['undertime']  # Add the calculated undertime
+                cell.alignment = Alignment(horizontal='center')
+                
+                # Track total undertime
+                if data['undertime']:
+                    try:
+                        hrs, mins = data['undertime'].split(':')
+                        total_undertime_mins += int(hrs) * 60 + int(mins)
+                    except:
+                        pass
+            
+            # Add borders to cells
+            for col in range(1, 7):
+                col_letter = get_column_letter(col)
+                worksheet[f'{col_letter}{row_start}'].border = openpyxl.styles.Border(
+                    left=openpyxl.styles.Side(border_style='thin'),
+                    right=openpyxl.styles.Side(border_style='thin'),
+                    top=openpyxl.styles.Side(border_style='thin'),
+                    bottom=openpyxl.styles.Side(border_style='thin')
+                )
+            
+            # Repeat for the second half (identical data for demo purposes)
+            # Day number cell for second half
+            cell = worksheet[f'I{row_start}']
+            cell.value = day
+            cell.alignment = Alignment(horizontal='center')
+            
+            # For Saturday/Sunday, still show time if available
+            if data['special'] in ['SATURDAY', 'SUNDAY']:
+                if data['arrival'] or data['departure']:
+                    # If they have logs, show them
+                    cell = worksheet[f'J{row_start}']
+                    cell.value = data['arrival'] if data['arrival'] else ''
+                    cell.alignment = Alignment(horizontal='center')
+                    
+                    cell = worksheet[f'K{row_start}']
+                    cell.value = data['lunch_out'] if data['lunch_out'] else ''
+                    cell.alignment = Alignment(horizontal='center')
+                    
+                    cell = worksheet[f'L{row_start}']
+                    cell.value = data['lunch_in'] if data['lunch_in'] else ''
+                    cell.alignment = Alignment(horizontal='center')
+                    
+                    cell = worksheet[f'M{row_start}']
+                    cell.value = data['departure'] if data['departure'] else ''
+                    cell.alignment = Alignment(horizontal='center')
+                    
+                    cell = worksheet[f'N{row_start}']
+                    cell.value = ''  # No undertime for weekends
+                    cell.alignment = Alignment(horizontal='center')
+                else:
+                    # No logs, just show the day type
+                    worksheet.merge_cells(f'J{row_start}:N{row_start}')
+                    cell = worksheet[f'J{row_start}']
+                    cell.value = data['special']
+                    cell.alignment = Alignment(horizontal='center')
+            elif data['special'] == 'ABSENT':
+                # For absent days
+                worksheet.merge_cells(f'J{row_start}:N{row_start}')
+                cell = worksheet[f'J{row_start}']
+                cell.value = 'ABSENT'
+                cell.alignment = Alignment(horizontal='center')
+            else:
+                # Regular day with time entries
+                cell = worksheet[f'J{row_start}']
+                cell.value = data['arrival']
+                cell.alignment = Alignment(horizontal='center')
+                
+                cell = worksheet[f'K{row_start}']
+                cell.value = data['lunch_out']
+                cell.alignment = Alignment(horizontal='center')
+                
+                cell = worksheet[f'L{row_start}']
+                cell.value = data['lunch_in']
+                cell.alignment = Alignment(horizontal='center')
+                
+                cell = worksheet[f'M{row_start}']
+                cell.value = data['departure']
+                cell.alignment = Alignment(horizontal='center')
+                
+                cell = worksheet[f'N{row_start}']
+                cell.value = data['undertime']  # Add the calculated undertime
+                cell.alignment = Alignment(horizontal='center')
+            
+            # Add borders to cells in second half
+            for col in range(9, 15):
+                col_letter = get_column_letter(col)
+                worksheet[f'{col_letter}{row_start}'].border = openpyxl.styles.Border(
+                    left=openpyxl.styles.Side(border_style='thin'),
+                    right=openpyxl.styles.Side(border_style='thin'),
+                    top=openpyxl.styles.Side(border_style='thin'),
+                    bottom=openpyxl.styles.Side(border_style='thin')
+                )
+                
+            row_start += 1
+    
+    # Convert total undertime minutes to hours and minutes
+    total_undertime_hours = total_undertime_mins // 60
+    total_undertime_minutes = total_undertime_mins % 60
+    total_undertime_str = f"{total_undertime_hours:02}:{total_undertime_minutes:02}"
+    
+    # Add Total row
+    cell = worksheet[f'A{row_start}']
+    cell.value = "Total"
+    cell.alignment = Alignment(horizontal='center')
+    cell.font = Font(bold=True)
+    
+    # Add total undertime
+    cell = worksheet[f'F{row_start}']
+    cell.value = total_undertime_str if total_undertime_mins > 0 else ""
+    cell.alignment = Alignment(horizontal='center')
+    cell.font = Font(bold=True)
+    
+    # Add borders to total row
+    for col in range(1, 7):
+        col_letter = get_column_letter(col)
+        worksheet[f'{col_letter}{row_start}'].border = openpyxl.styles.Border(
+            left=openpyxl.styles.Side(border_style='thin'),
+            right=openpyxl.styles.Side(border_style='thin'),
+            top=openpyxl.styles.Side(border_style='thin'),
+            bottom=openpyxl.styles.Side(border_style='thin')
+        )
+    
+    # Repeat for second half
+    cell = worksheet[f'I{row_start}']
+    cell.value = "Total"
+    cell.alignment = Alignment(horizontal='center')
+    cell.font = Font(bold=True)
+    
+    # Add total undertime to second half
+    cell = worksheet[f'N{row_start}']
+    cell.value = total_undertime_str if total_undertime_mins > 0 else ""
+    cell.alignment = Alignment(horizontal='center')
+    cell.font = Font(bold=True)
+    
+    # Add borders to total row in second half
+    for col in range(9, 15):
+        col_letter = get_column_letter(col)
+        worksheet[f'{col_letter}{row_start}'].border = openpyxl.styles.Border(
+            left=openpyxl.styles.Side(border_style='thin'),
+            right=openpyxl.styles.Side(border_style='thin'),
+            top=openpyxl.styles.Side(border_style='thin'),
+            bottom=openpyxl.styles.Side(border_style='thin')
+        )
+    
+    # Add certification text
+    certification_row = row_start + 2
+    
+    # First DTR certification
+    worksheet.merge_cells(f'A{certification_row}:F{certification_row}')
+    cell = worksheet[f'A{certification_row}']
+    cell.value = "I certify on my honor that the above is a true and"
+    cell.alignment = Alignment(horizontal='center')
+    
+    cert_row2 = certification_row + 1
+    worksheet.merge_cells(f'A{cert_row2}:F{cert_row2}')
+    cell = worksheet[f'A{cert_row2}']
+    cell.value = "correct report of the hours of work performed, record"
+    cell.alignment = Alignment(horizontal='center')
+    
+    cert_row3 = cert_row2 + 1
+    worksheet.merge_cells(f'A{cert_row3}:F{cert_row3}')
+    cell = worksheet[f'A{cert_row3}']
+    cell.value = "of which was made daily at the time of arrival and"
+    cell.alignment = Alignment(horizontal='center')
+    
+    cert_row4 = cert_row3 + 1
+    worksheet.merge_cells(f'A{cert_row4}:F{cert_row4}')
+    cell = worksheet[f'A{cert_row4}']
+    cell.value = "departure from office."
+    cell.alignment = Alignment(horizontal='center')
+    
+    # Second DTR certification (mirror of the first)
+    worksheet.merge_cells(f'I{certification_row}:N{certification_row}')
+    cell = worksheet[f'I{certification_row}']
+    cell.value = "I certify on my honor that the above is a true and"
+    cell.alignment = Alignment(horizontal='center')
+    
+    worksheet.merge_cells(f'I{cert_row2}:N{cert_row2}')
+    cell = worksheet[f'I{cert_row2}']
+    cell.value = "correct report of the hours of work performed, record"
+    cell.alignment = Alignment(horizontal='center')
+    
+    worksheet.merge_cells(f'I{cert_row3}:N{cert_row3}')
+    cell = worksheet[f'I{cert_row3}']
+    cell.value = "of which was made daily at the time of arrival and"
+    cell.alignment = Alignment(horizontal='center')
+    
+    worksheet.merge_cells(f'I{cert_row4}:N{cert_row4}')
+    cell = worksheet[f'I{cert_row4}']
+    cell.value = "departure from office."
+    cell.alignment = Alignment(horizontal='center')
+    
+    # Add signature lines
+    sig_row = cert_row4 + 3  # Add space before signature line
+    
+    # First DTR signature line
+    worksheet.merge_cells(f'A{sig_row}:F{sig_row}')
+    cell = worksheet[f'A{sig_row}']
+    cell.value = "_" * 40
+    cell.alignment = Alignment(horizontal='center')
+    
+    sig_label_row = sig_row + 1
+    worksheet.merge_cells(f'A{sig_label_row}:F{sig_label_row}')
+    cell = worksheet[f'A{sig_label_row}']
+    cell.value = "Signature of Employee"
+    cell.alignment = Alignment(horizontal='center')
+    
+    # Second DTR signature line
+    worksheet.merge_cells(f'I{sig_row}:N{sig_row}')
+    cell = worksheet[f'I{sig_row}']
+    cell.value = "_" * 40
+    cell.alignment = Alignment(horizontal='center')
+    
+    worksheet.merge_cells(f'I{sig_label_row}:N{sig_label_row}')
+    cell = worksheet[f'I{sig_label_row}']
+    cell.value = "Signature of Employee"
+    cell.alignment = Alignment(horizontal='center')
+    
+    # Add verification text
+    verify_row = sig_label_row + 2
+    
+    # First DTR verification
+    worksheet.merge_cells(f'A{verify_row}:F{verify_row}')
+    cell = worksheet[f'A{verify_row}']
+    cell.value = "Verified as to the prescribed office hours."
+    cell.alignment = Alignment(horizontal='center')
+    
+    # Second DTR verification
+    worksheet.merge_cells(f'I{verify_row}:N{verify_row}')
+    cell = worksheet[f'I{verify_row}']
+    cell.value = "Verified as to the prescribed office hours."
+    cell.alignment = Alignment(horizontal='center')
+    
+    # Add supervisor signature lines
+    super_sig_row = verify_row + 3
+    
+    # First DTR supervisor signature
+    worksheet.merge_cells(f'A{super_sig_row}:F{super_sig_row}')
+    cell = worksheet[f'A{super_sig_row}']
+    cell.value = "_" * 40
+    cell.alignment = Alignment(horizontal='center')
+    
+    # Second DTR supervisor signature
+    worksheet.merge_cells(f'I{super_sig_row}:N{super_sig_row}')
+    cell = worksheet[f'I{super_sig_row}']
+    cell.value = "_" * 40
+    cell.alignment = Alignment(horizontal='center')
+    
+    # Add supervisor name and position
+    name_row = super_sig_row + 1
+    
+    # First DTR supervisor name
+    worksheet.merge_cells(f'A{name_row}:F{name_row}')
+    cell = worksheet[f'A{name_row}']
+    cell.value = "FORTUNATO L. PALILEO"
+    cell.alignment = Alignment(horizontal='center')
+    cell.font = Font(bold=True)
+    
+    # Second DTR supervisor name
+    worksheet.merge_cells(f'I{name_row}:N{name_row}')
+    cell = worksheet[f'I{name_row}']
+    cell.value = "FORTUNATO L. PALILEO"
+    cell.alignment = Alignment(horizontal='center')
+    cell.font = Font(bold=True)
+    
+    # Add supervisor position
+    pos_row = name_row + 1
+    
+    # First DTR supervisor position
+    worksheet.merge_cells(f'A{pos_row}:F{pos_row}')
+    cell = worksheet[f'A{pos_row}']
+    cell.value = "CHIEF, EDP SERVICES"
+    cell.alignment = Alignment(horizontal='center')
+    
+    # Second DTR supervisor position
+    worksheet.merge_cells(f'I{pos_row}:N{pos_row}')
+    cell = worksheet[f'I{pos_row}']
+    cell.value = "CHIEF, EDP SERVICES"
+    cell.alignment = Alignment(horizontal='center')
+    
+    # Set column widths to match expected format (this stays as it was)
+    worksheet.column_dimensions['A'].width = 8
+    worksheet.column_dimensions['B'].width = 8
+    worksheet.column_dimensions['C'].width = 8
+    worksheet.column_dimensions['D'].width = 8
+    worksheet.column_dimensions['E'].width = 8
+    worksheet.column_dimensions['F'].width = 10
+    
+    # Add gap columns (G, H)
+    worksheet.column_dimensions['G'].width = 5
+    worksheet.column_dimensions['H'].width = 5
+    
+    # Second DTR section columns
+    worksheet.column_dimensions['I'].width = 8
+    worksheet.column_dimensions['J'].width = 8
+    worksheet.column_dimensions['K'].width = 8
+    worksheet.column_dimensions['L'].width = 8
+    worksheet.column_dimensions['M'].width = 8
+    worksheet.column_dimensions['N'].width = 10
 
 from openpyxl.utils import get_column_letter
 from openpyxl import load_workbook
@@ -595,9 +1149,6 @@ def save_to_database(filename, output_path):
                    (filename, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), output_path))
     conn.commit()
     conn.close()
-    
-    # Add to Excel listbox
-    employee_list_entry.insert(tk.END, output_path)
 
 def load_excel_history():
     conn = sqlite3.connect("conversion_history.db")
@@ -829,7 +1380,7 @@ class StyledTkinter:
 def create_improved_gui():
     root = tk.Tk()
     root.title("Employee DTR Converter")
-    root.geometry("900x800")
+    root.geometry("800x800")
     root.configure(bg=StyledTkinter.COLORS['bg_primary'])
 
     # Main Container
@@ -889,7 +1440,7 @@ def create_improved_gui():
     # Employee List Preview
     preview_employee_list = tk.Text(
         employee_preview_frame, 
-        height=5, 
+        height=10, 
         font=("Courier", 10), 
         state=tk.DISABLED, 
         wrap=tk.NONE,
