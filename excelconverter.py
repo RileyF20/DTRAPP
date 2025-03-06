@@ -49,14 +49,6 @@ def create_database():
     conn.commit()
     conn.close()
 
-def save_to_database(filename, output_path):
-    conn = sqlite3.connect("conversion_history.db")
-    cursor = conn.cursor()
-    cursor.execute("INSERT INTO conversions (filename, converted_at, output_path) VALUES (?, ?, ?)", 
-                   (filename, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), output_path))
-    conn.commit()
-    conn.close()
-
 def format_dtr_summary_sheet(writer, df, month_year):
     """
     Formats the DTR summary sheet to match the layout in the example image
@@ -65,14 +57,32 @@ def format_dtr_summary_sheet(writer, df, month_year):
     sheet_name = f"DTR - {month_year}"
     worksheet = writer.sheets[sheet_name]
     
-    # Add title
-    worksheet['A1'] = f"DAILY TIME RECORD SUMMARY - {month_year.upper()}"
-    worksheet['A1'].font = Font(size=14, bold=True)
-    worksheet.merge_cells('A1:E1')
-    
     # Get all date columns from the existing data
     date_columns = [col for col in df.columns if "Time In" in col or "Time Out" in col]
     unique_dates = sorted(set([col.split(" (")[0] for col in date_columns if " (" in col]))
+    
+    # Calculate total number of columns used in the sheet
+    # 2 columns for ID and NAME + 2 columns for each date (AM/PM)
+    total_columns = 2 + (len(unique_dates) * 2)
+    
+    # Convert the column number to Excel column letter
+    from openpyxl.utils import get_column_letter
+    last_column_letter = get_column_letter(total_columns)
+    
+    # Add title (just month and year) and center it across all columns
+    worksheet['A1'] = month_year.upper()
+    worksheet['A1'].font = Font(name='Calibri', size=20, bold=True)
+    worksheet['A1'].alignment = Alignment(horizontal='center')
+    
+    # Import PatternFill and apply orange background color
+    from openpyxl.styles import PatternFill
+    
+    # Apply the fill to cell A1
+    cell = worksheet.cell(row=1, column=1)
+    cell.fill = PatternFill(start_color='F4B084', end_color='F4B084', fill_type='solid')
+    
+    # Merge the title across all columns
+    worksheet.merge_cells(f'A1:{last_column_letter}1')
     
     # Starting row and column for the ID and NAME headers
     header_row = 3
@@ -88,13 +98,23 @@ def format_dtr_summary_sheet(writer, df, month_year):
         header_cell.font = Font(bold=True)
         header_cell.alignment = Alignment(horizontal='center')
     
-    # Add date headers
+    # Set width for ID and NAME columns
+    worksheet.column_dimensions['A'].width = 15  # For ID column
+    worksheet.column_dimensions['B'].width = 30  # For NAME column
+    
+    # Add date headers and set column widths for AM/PM columns
     for i, date_str in enumerate(unique_dates):
         date = datetime.strptime(date_str, '%Y-%m-%d')
         # Date column
         date_col = start_col + i*2
         day_name = date.strftime('%a').upper()
         formatted_date = date.strftime('%d/%m/%Y')
+        
+        # Set width for AM/PM columns to 12.00
+        am_col_letter = get_column_letter(date_col)
+        pm_col_letter = get_column_letter(date_col+1)
+        worksheet.column_dimensions[am_col_letter].width = 12.00
+        worksheet.column_dimensions[pm_col_letter].width = 12.00
         
         # Date cell
         worksheet.cell(row=header_row, column=date_col, value=formatted_date)
@@ -139,6 +159,7 @@ def format_dtr_summary_sheet(writer, df, month_year):
     # Clear any existing data and write employee data starting from row 6
     employee_start_row = header_row + 3  # This is row 6 in the worksheet
     
+    # Rest of your existing code for clearing and writing employee data...
     # Clear rows that might have data from to_excel
     for row in range(employee_start_row, worksheet.max_row + 1):
         for col in range(1, worksheet.max_column + 1):
@@ -187,8 +208,12 @@ def format_dtr_summary_sheet(writer, df, month_year):
     # This freezes rows 1-5 and columns A-B
     worksheet.freeze_panes = 'C6'
 
+    from openpyxl.styles import PatternFill
+    orange_fill = PatternFill(start_color='FF9E65', end_color='FF9E65', fill_type='solid')
+    worksheet['C1'].fill = orange_fill
+    
 def filter_in_out_entries(df):
-    # Keep your original function mostly intact
+    # Keep your original function mostly intactpy excelconverter.py
     # Validate input DataFrame
     if df.shape[1] < 2:
         return df  # Return original if insufficient columns
