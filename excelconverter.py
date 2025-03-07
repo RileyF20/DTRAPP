@@ -268,7 +268,8 @@ def format_dtr_summary_sheet(writer, df, month_year):
                 # Write values
                 am_cell = worksheet.cell(row=employee_start_row + i, column=start_col + date_idx*2)
                 pm_cell = worksheet.cell(row=employee_start_row + i, column=start_col + date_idx*2 + 1)
-                
+                am_cell.value = am_value  
+                pm_cell.value = pm_value
             
                 
                 # Center align the time cells and add borders
@@ -277,7 +278,6 @@ def format_dtr_summary_sheet(writer, df, month_year):
                 am_cell.border = thin_border
                 pm_cell.border = thin_border
                 
-                # Apply conditional formatting here if needed
     
     # Create frozen panes to keep headers and ID/Name columns visible when scrolling
     # Freeze panes at cell C6 (row 6, column 3)
