@@ -58,16 +58,11 @@ def format_dtr_summary_sheet(writer, df, month_year):
     from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
     from openpyxl.utils import get_column_letter
     
-    # Access the workbook and worksheet
-    workbook = writer.book
     sheet_name = f"DTR - {month_year}"
     
-    # Use openpyxl worksheet directly instead of ExcelWriter's wrapper
-    try:
-        worksheet = workbook[sheet_name]
-    except:
-        print(f"Sheet {sheet_name} not found. Available sheets: {workbook.sheetnames}")
-        return
+    # Get the workbook and worksheet directly
+    workbook = writer.book
+    worksheet = workbook[sheet_name]
     
     # Get all date columns from the existing data
     date_columns = [col for col in df.columns if "Time In" in col or "Time Out" in col]
@@ -77,54 +72,63 @@ def format_dtr_summary_sheet(writer, df, month_year):
     # 2 columns for ID and NAME + 2 columns for each date (AM/PM)
     total_columns = 2 + (len(unique_dates) * 2)
     
+    # Clear existing merges to avoid conflicts
+    for merged_range in list(worksheet.merged_cells.ranges):
+        worksheet.unmerge_cells(str(merged_range))
+    
     # Convert the column number to Excel column letter
     last_column_letter = get_column_letter(total_columns)
-    
-    # ----- Clear existing formatting -----
-    # This helps prevent issues with existing merged cells
-    try:
-        for row in worksheet.merged_cells.ranges:
-            worksheet.unmerge_cells(str(row))
-    except Exception as e:
-        print(f"Error unmerging cells: {e}")
     
     # Define orange fill for title
     orange_fill = PatternFill(start_color='F4B084', end_color='F4B084', fill_type='solid')
     
-    # Add title (just month and year) and center it across all columns
-    cell = worksheet.cell(row=1, column=1)
-    cell.value = month_year.upper()
-    cell.font = Font(name='Calibri', size=20, bold=True)
-    cell.alignment = Alignment(horizontal='center')
-    cell.fill = orange_fill
+    # Apply the title and formatting to A1 BEFORE merging
+    title_cell = worksheet.cell(row=1, column=1)
+    title_cell.value = month_year.upper()
+    title_cell.font = Font(name='Calibri', size=20, bold=True)
+    title_cell.alignment = Alignment(horizontal='center')
+    title_cell.fill = orange_fill
     
     # Merge the title across all columns
     worksheet.merge_cells(f'A1:{last_column_letter}1')
     
-    # Define border style
-    thin_border = Border(left=Side(style='thin'), right=Side(style='thin'), 
-                         top=Side(style='thin'), bottom=Side(style='thin'))
+    # Set the height for title row (row 1)
+    worksheet.row_dimensions[1].height = 30
+    
+    # Set the height for spacer row (row 2)
+    worksheet.row_dimensions[2].height = 15
     
     # Starting row and column for the ID and NAME headers
     header_row = 3
     start_col = 3  # Column C (after ID and Name)
+    
+    # Set heights for header rows (3, 4, 5)
+    worksheet.row_dimensions[header_row].height = 25     # Date row
+    worksheet.row_dimensions[header_row+1].height = 25   # Day name row
+    worksheet.row_dimensions[header_row+2].height = 25   # AM/PM row
     
     # Add ID and NAME headers
     id_cell = worksheet.cell(row=header_row, column=1)
     id_cell.value = "ID"
     id_cell.font = Font(bold=True)
     id_cell.alignment = Alignment(horizontal='center', vertical='center')
-    id_cell.border = thin_border
     
     name_cell = worksheet.cell(row=header_row, column=2)
     name_cell.value = "NAME"
     name_cell.font = Font(bold=True)
     name_cell.alignment = Alignment(horizontal='center', vertical='center')
-    name_cell.border = thin_border
     
     # Set width for ID and NAME columns
     worksheet.column_dimensions['A'].width = 15  # For ID column
     worksheet.column_dimensions['B'].width = 30  # For NAME column
+    
+    # Define border style
+    thin_border = Border(left=Side(style='thin'), right=Side(style='thin'), 
+                         top=Side(style='thin'), bottom=Side(style='thin'))
+    
+    # Apply borders to the ID and NAME cells
+    id_cell.border = thin_border
+    name_cell.border = thin_border
     
     # Merge NAME cell vertically across rows 3, 4, and 5
     worksheet.merge_cells(start_row=header_row, start_column=2, 
@@ -145,142 +149,140 @@ def format_dtr_summary_sheet(writer, df, month_year):
         'SUN': PatternFill(start_color='FCE4D6', end_color='FCE4D6', fill_type='solid')
     }
     
+    # Row colors for employee rows (alternating colors)
+    row_colors = [
+        PatternFill(start_color='FFD6D6', end_color='FFD6D6', fill_type='solid'),  # Light Red
+        PatternFill(start_color='E2EFDA', end_color='E2EFDA', fill_type='solid'),  # Light Green
+        PatternFill(start_color='FFF2CC', end_color='FFF2CC', fill_type='solid'),  # Light Yellow
+        PatternFill(start_color='DEEBF7', end_color='DEEBF7', fill_type='solid'),  # Light Blue
+    ]
+    
     # Add date headers and set column widths for AM/PM columns
     for i, date_str in enumerate(unique_dates):
-        try:
-            date = datetime.strptime(date_str, '%Y-%m-%d')
-            # Date column
-            date_col = start_col + i*2
-            day_name = date.strftime('%a').upper()
-            formatted_date = date.strftime('%d/%m/%Y')
-            
-            # Get the appropriate fill for this day
-            current_fill = day_fills.get(day_name, None)
-            
-            # Set width for AM/PM columns to 12.00
-            am_col_letter = get_column_letter(date_col)
-            pm_col_letter = get_column_letter(date_col+1)
-            worksheet.column_dimensions[am_col_letter].width = 12.00
-            worksheet.column_dimensions[pm_col_letter].width = 12.00
-            
-            # Date cell
-            date_cell = worksheet.cell(row=header_row, column=date_col)
-            date_cell.value = formatted_date
-            date_cell.font = Font(bold=True)
-            date_cell.alignment = Alignment(horizontal='center')
-            date_cell.border = thin_border
-            
-            # Next cell in the date row
-            next_date_cell = worksheet.cell(row=header_row, column=date_col+1)
-            next_date_cell.border = thin_border
-            
-            # Merge date cells
-            worksheet.merge_cells(start_row=header_row, start_column=date_col, 
-                                end_row=header_row, end_column=date_col+1)
-            
-            # Day name cell - row 4 (header_row + 1)
-            day_row = header_row + 1
-            day_cell = worksheet.cell(row=day_row, column=date_col)
-            day_cell.value = day_name
-            day_cell.font = Font(bold=True)
-            day_cell.alignment = Alignment(horizontal='center')
-            day_cell.border = thin_border
-            
-            # Apply the fill to the day cell
-            if current_fill:
-                day_cell.fill = current_fill
-            
-            # Next cell in the day row
-            next_day_cell = worksheet.cell(row=day_row, column=date_col+1)
-            next_day_cell.border = thin_border
-            if current_fill:
-                next_day_cell.fill = current_fill
-            
-            # Merge day name cells
-            worksheet.merge_cells(start_row=day_row, start_column=date_col, 
-                                end_row=day_row, end_column=date_col+1)
-            
-            # AM/PM headers - row 5 (header_row + 2)
-            am_pm_row = header_row + 2
-            am_cell = worksheet.cell(row=am_pm_row, column=date_col)
-            pm_cell = worksheet.cell(row=am_pm_row, column=date_col+1)
-            
-            am_cell.value = "AM"
-            pm_cell.value = "PM"
-            
-            # Style AM/PM headers
-            am_cell.font = Font(bold=True)
-            pm_cell.font = Font(bold=True)
-            am_cell.alignment = Alignment(horizontal='center')
-            pm_cell.alignment = Alignment(horizontal='center')
-            am_cell.border = thin_border
-            pm_cell.border = thin_border
-            
-            # Apply the color fill to the AM/PM cells
-            if current_fill:
-                am_cell.fill = current_fill
-                pm_cell.fill = current_fill
-        except Exception as e:
-            print(f"Error formatting date {date_str}: {e}")
+        date = datetime.strptime(date_str, '%Y-%m-%d')
+        # Date column
+        date_col = start_col + i*2
+        day_name = date.strftime('%a').upper()
+        formatted_date = date.strftime('%d/%m/%Y')
+        
+        # Get the appropriate fill for this day
+        current_fill = day_fills.get(day_name, None)
+        
+        # Set width for AM/PM columns to exactly 12.00 (approx 115 pixels)
+        am_col_letter = get_column_letter(date_col)
+        pm_col_letter = get_column_letter(date_col+1)
+        worksheet.column_dimensions[am_col_letter].width = 12.00
+        worksheet.column_dimensions[pm_col_letter].width = 12.00
+        
+        # Date cell formatting
+        date_cell = worksheet.cell(row=header_row, column=date_col)
+        date_cell.value = formatted_date
+        date_cell.font = Font(bold=True)
+        date_cell.alignment = Alignment(horizontal='center')
+        date_cell.border = thin_border
+        
+        next_date_cell = worksheet.cell(row=header_row, column=date_col+1)
+        next_date_cell.border = thin_border
+        
+        # Merge date cells
+        worksheet.merge_cells(start_row=header_row, start_column=date_col, 
+                             end_row=header_row, end_column=date_col+1)
+        
+        # Day name cell
+        day_row = header_row + 1
+        day_cell = worksheet.cell(row=day_row, column=date_col)
+        day_cell.value = day_name
+        day_cell.font = Font(bold=True)
+        day_cell.alignment = Alignment(horizontal='center')
+        day_cell.border = thin_border
+        
+        # Apply fill to day cell
+        if current_fill:
+            day_cell.fill = current_fill
+        
+        next_day_cell = worksheet.cell(row=day_row, column=date_col+1)
+        next_day_cell.border = thin_border
+        if current_fill:
+            next_day_cell.fill = current_fill
+        
+        # Merge day cells
+        worksheet.merge_cells(start_row=day_row, start_column=date_col, 
+                             end_row=day_row, end_column=date_col+1)
+        
+        # AM/PM headers
+        am_pm_row = header_row + 2
+        am_cell = worksheet.cell(row=am_pm_row, column=date_col)
+        pm_cell = worksheet.cell(row=am_pm_row, column=date_col+1)
+        
+        am_cell.value = "AM"
+        pm_cell.value = "PM"
+        
+        # Style AM/PM headers
+        am_cell.font = Font(bold=True)
+        pm_cell.font = Font(bold=True)
+        am_cell.alignment = Alignment(horizontal='center')
+        pm_cell.alignment = Alignment(horizontal='center')
+        am_cell.border = thin_border
+        pm_cell.border = thin_border
+        
+        # Apply fill to AM/PM cells
+        if current_fill:
+            am_cell.fill = current_fill
+            pm_cell.fill = current_fill
+    
+    # Employee data row height (approximately 45 pixels = 75.00 points)
+    row_height = 45
     
     # Clear any existing data and write employee data starting from row 6
     employee_start_row = header_row + 3  # This is row 6 in the worksheet
     
     # Write employee data
-    try:
-        for i, row in df.iterrows():
-            # Write ID and Name
-            id_cell = worksheet.cell(row=employee_start_row + i, column=1)
-            name_cell = worksheet.cell(row=employee_start_row + i, column=2)
+    for i, row in df.iterrows():
+        # Set row height for employee rows
+        worksheet.row_dimensions[employee_start_row + i].height = row_height
+        
+        # Write ID and Name
+        id_cell = worksheet.cell(row=employee_start_row + i, column=1)
+        name_cell = worksheet.cell(row=employee_start_row + i, column=2)
+        
+        id_cell.value = row.get('Employee No.', '')
+        name_cell.value = row.get(df.columns[1], '') if len(df.columns) > 1 else ''
+        
+        # Format ID and NAME cells
+        id_cell.alignment = Alignment(horizontal='center')
+        name_cell.alignment = Alignment(horizontal='left')
+        id_cell.border = thin_border
+        name_cell.border = thin_border
+        
+        
+        # Write time entries
+        for date_idx, date_str in enumerate(unique_dates):
+            # Find the corresponding columns in the DataFrame
+            am_col = next((col for col in df.columns if date_str in col and "Time In" in col), None)
+            pm_col = next((col for col in df.columns if date_str in col and "Time Out" in col), None)
             
-            id_cell.value = row.get('Employee No.', '')
-            name_cell.value = row.get(df.columns[1], '')  # Assuming Name is the second column
-            
-            # Format ID and NAME cells
-            id_cell.alignment = Alignment(horizontal='center')
-            name_cell.alignment = Alignment(horizontal='left')
-            id_cell.border = thin_border
-            name_cell.border = thin_border
-            
-            # Write time entries
-            for date_idx, date_str in enumerate(unique_dates):
-                # Find the corresponding columns in the DataFrame
-                am_col = next((col for col in df.columns if date_str in col and "Time In" in col), None)
-                pm_col = next((col for col in df.columns if date_str in col and "Time Out" in col), None)
+            if am_col and pm_col:
+                am_value = row.get(am_col, '')
+                pm_value = row.get(pm_col, '')
                 
-                if am_col and pm_col:
-                    am_value = row.get(am_col, '')
-                    pm_value = row.get(pm_col, '')
-                    
-                    # Write values
-                    am_cell = worksheet.cell(row=employee_start_row + i, column=start_col + date_idx*2)
-                    pm_cell = worksheet.cell(row=employee_start_row + i, column=start_col + date_idx*2 + 1)
-                    
-                    am_cell.value = am_value
-                    pm_cell.value = pm_value
-                    
-                    # Format special values
-                    for cell_value, cell in [(am_value, am_cell), (pm_value, pm_cell)]:
-                        if isinstance(cell_value, str) and cell_value.upper() in ["SATURDAY", "SUNDAY", "ABSENT"]:
-                            cell.value = cell_value.upper()
-                    
-                    # Center align the time cells and add borders
-                    am_cell.alignment = Alignment(horizontal='center')
-                    pm_cell.alignment = Alignment(horizontal='center')
-                    am_cell.border = thin_border
-                    pm_cell.border = thin_border
-    except Exception as e:
-        print(f"Error writing employee data: {e}")
+                # Write values
+                am_cell = worksheet.cell(row=employee_start_row + i, column=start_col + date_idx*2)
+                pm_cell = worksheet.cell(row=employee_start_row + i, column=start_col + date_idx*2 + 1)
+                
+            
+                
+                # Center align the time cells and add borders
+                am_cell.alignment = Alignment(horizontal='center', vertical='center')
+                pm_cell.alignment = Alignment(horizontal='center', vertical='center')
+                am_cell.border = thin_border
+                pm_cell.border = thin_border
+                
+                # Apply conditional formatting here if needed
     
     # Create frozen panes to keep headers and ID/Name columns visible when scrolling
     # Freeze panes at cell C6 (row 6, column 3)
     worksheet.freeze_panes = 'C6'
     
-    # Save changes to ensure they are applied
-    try:
-        writer.save()
-    except Exception as e:
-        print(f"Error saving workbook: {e}")
     
 def filter_in_out_entries(df):
     # Keep your original function mostly intactpy excelconverter.py
