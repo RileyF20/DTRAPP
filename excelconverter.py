@@ -285,7 +285,11 @@ def format_dtr_summary_sheet(writer, df, month_year):
     
     
 def filter_in_out_entries(df):
-    # Keep your original function mostly intactpy excelconverter.py
+    # Check if dataframe is None or empty
+    if df is None or len(df) == 0:
+        print("Warning: Empty or None DataFrame provided to filter_in_out_entries")
+        return pd.DataFrame()  # Return empty DataFrame instead of None
+        
     # Validate input DataFrame
     if df.shape[1] < 2:
         return df  # Return original if insufficient columns
@@ -309,27 +313,62 @@ def filter_in_out_entries(df):
         axis=1
     )
     
-    # Determine time-in and time-out logs
+    # Define the process_daily_logs function for determining time-in and time-out
     def process_daily_logs(times, hours):
+        # Handle empty list case
+        if not times or not hours:
+            return None, None  # This will become NaN when processed by pandas
+            
         # Sort times to ensure chronological order
-        sorted_times = sorted(zip(times, hours), key=lambda x: x[1])
+        sorted_logs = sorted(zip(times, hours), key=lambda x: x[1])
         
-        if len(sorted_times) == 1:
+        if len(sorted_logs) == 1:
             # Single log handling
-            time, hour = sorted_times[0]
+            time, hour = sorted_logs[0]
             if hour < 12:
                 return time, "No Out"
             else:
                 return "No In", time
         else:
-            # Multiple logs
-            return sorted_times[0][0], sorted_times[-1][0]
+            # Group logs by hour to detect duplicates
+            hour_groups = {}
+            for time, hour in sorted_logs:
+                if hour not in hour_groups:
+                    hour_groups[hour] = []
+                hour_groups[hour].append(time)
+            
+            # Keep only the latest log for each hour
+            filtered_logs = []
+            for hour, time_logs in hour_groups.items():
+                # Add the latest log from each hour group
+                filtered_logs.append((sorted(time_logs)[-1], hour))
+            
+            # Re-sort after filtering
+            filtered_logs.sort(key=lambda x: x[1])
+            
+            # If we have only one log after filtering
+            if len(filtered_logs) == 1:
+                time, hour = filtered_logs[0]
+                if hour < 12:
+                    return time, "No Out"
+                else:
+                    return "No In", time
+                    
+            # If we have multiple logs after filtering
+            return filtered_logs[0][0], filtered_logs[-1][0]
 
-    # Apply log processing
-    grouped[['Time In', 'Time Out']] = grouped.apply(
-        lambda row: pd.Series(process_daily_logs(row['Time'], row['Hours'])), 
-        axis=1
-    )
+    # Apply log processing with error handling
+    try:
+        grouped[['Time In', 'Time Out']] = grouped.apply(
+            lambda row: pd.Series(process_daily_logs(row['Time'], row['Hours'])), 
+            axis=1
+        )
+    except Exception as e:
+        print(f"Error processing daily logs: {e}")
+        # Provide default values to avoid None
+        grouped['Time In'] = ''
+        grouped['Time Out'] = ''
+    
     grouped = grouped.drop(columns=['Time', 'Hours'])
 
     # Generate full date range for the month
@@ -350,10 +389,18 @@ def filter_in_out_entries(df):
         # Create full index for all employees and dates
         all_employees = df[first_col].unique()
         full_index = pd.MultiIndex.from_product([all_employees, all_dates], names=[first_col, 'Date'])
-        grouped = grouped.set_index([first_col, 'Date']).reindex(full_index).reset_index()
+        
+        # Try/except to handle potential errors during reindexing
+        try:
+            grouped = grouped.set_index([first_col, 'Date']).reindex(full_index).reset_index()
+        except Exception as e:
+            print(f"Error during reindexing: {e}")
+            # If reindexing fails, continue with the grouped data we have
+            if not isinstance(grouped, pd.DataFrame) or grouped.empty:
+                return pd.DataFrame()  # Return empty DataFrame if grouped is None or empty
 
     # Determine day of the week
-    grouped['DayOfWeek'] = grouped['Date'].apply(lambda x: pd.to_datetime(x).strftime('%A'))
+    grouped['DayOfWeek'] = grouped['Date'].apply(lambda x: pd.to_datetime(x).strftime('%A') if pd.notna(x) else '')
 
     # Mark absences and weekend days
     def mark_absences(row):
@@ -369,21 +416,30 @@ def filter_in_out_entries(df):
     grouped[['Time In', 'Time Out']] = grouped.apply(mark_absences, axis=1, result_type="expand")
 
     # Add Employee No. mapping (assuming employee_list is defined elsewhere)
-    name_to_id = {v: k for k, v in employee_list.items()}
-    grouped['Employee No.'] = grouped[first_col].map(name_to_id)
+    try:
+        name_to_id = {v: k for k, v in employee_list.items()}
+        grouped['Employee No.'] = grouped[first_col].map(name_to_id)
+    except Exception as e:
+        print(f"Error mapping employee names to IDs: {e}")
+        # Create a default Employee No. column if mapping fails
+        grouped['Employee No.'] = grouped[first_col]
 
     # For float columns, fill with 0.0 or another appropriate numeric value
     grouped.fillna({col: 0.0 for col in grouped.select_dtypes(include=['float64']).columns}, inplace=True)
     # For string columns, fill with empty string
     grouped.fillna({col: '' for col in grouped.select_dtypes(include=['object']).columns}, inplace=True)
 
-    # Pivot and format results
-    result = grouped.pivot(index=['Employee No.', first_col], columns='Date', values=['Time In', 'Time Out'])
-    result = result.swaplevel(axis=1).sort_index(axis=1, level=0)
-    result.columns = [f"{date} ({datetime.strptime(date, '%Y-%m-%d').strftime('%A')}) {status}" 
-                      for date, status in result.columns]
-
-    return result.reset_index().sort_values(by="Employee No.").reset_index(drop=True)
+    # Pivot and format results with error handling
+    try:
+        result = grouped.pivot(index=['Employee No.', first_col], columns='Date', values=['Time In', 'Time Out'])
+        result = result.swaplevel(axis=1).sort_index(axis=1, level=0)
+        result.columns = [f"{date} ({datetime.strptime(date, '%Y-%m-%d').strftime('%A')}) {status}" 
+                        for date, status in result.columns]
+        return result.reset_index().sort_values(by="Employee No.").reset_index(drop=True)
+    except Exception as e:
+        print(f"Error during pivot operation: {e}")
+        # If pivot fails, return the grouped data as is
+        return grouped
 
 def convert_batch_to_excel(files):
     for dat_file in files:
@@ -699,12 +755,23 @@ def generate_employee_dtr(writer, df, employee_name):
             if calendar_data[day]['special'] == 'ABSENT':
                 calendar_data[day]['special'] = ''
             
-            # Sort by hour to get earliest and latest
+            # First, filter out duplicate logs in the same hour
+            # For duplicates in the same hour, keep only the latest one
+            filtered_logs = []
+            seen_hours = set()
+            
+            # Sort by timestamp (ascending) to ensure we keep the latest one when filtering
             logs.sort(key=lambda x: x[1])
             
-            if len(logs) == 1:
+            for time, hour in logs:
+                if hour not in seen_hours:
+                    seen_hours.add(hour)
+                    filtered_logs.append((time, hour))
+            
+            # Now use the filtered logs
+            if len(filtered_logs) == 1:
                 # Single log - determine if it's arrival or departure based on time
-                time, hour = logs[0]
+                time, hour = filtered_logs[0]
                 if hour < 12:  # Morning log
                     calendar_data[day]['arrival'] = time
                     calendar_data[day]['departure'] = "No Out"
@@ -717,13 +784,32 @@ def generate_employee_dtr(writer, df, employee_name):
                     # Set default lunch break for days with logs
                     calendar_data[day]['lunch_out'] = "12:01"
                     calendar_data[day]['lunch_in'] = "12:55"
-            elif len(logs) >= 2:
-                # Multiple logs - take first and last
-                calendar_data[day]['arrival'] = logs[0][0]
-                calendar_data[day]['departure'] = logs[-1][0]
-                # Set default lunch break for days with logs
-                calendar_data[day]['lunch_out'] = "12:01"
-                calendar_data[day]['lunch_in'] = "12:55"
+            elif len(filtered_logs) >= 2:
+                # Check if logs are all in the morning or all in the afternoon
+                morning_logs = [log for log in filtered_logs if log[1] < 12]
+                afternoon_logs = [log for log in filtered_logs if log[1] >= 12]
+                
+                if morning_logs and not afternoon_logs:
+                    # All logs are in the morning
+                    calendar_data[day]['arrival'] = morning_logs[0][0]  # First morning log
+                    calendar_data[day]['departure'] = "No Out"
+                    # Set default lunch break
+                    calendar_data[day]['lunch_out'] = "12:01"
+                    calendar_data[day]['lunch_in'] = "12:55"
+                elif afternoon_logs and not morning_logs:
+                    # All logs are in the afternoon
+                    calendar_data[day]['arrival'] = "No In"
+                    calendar_data[day]['departure'] = afternoon_logs[-1][0]  # Last afternoon log
+                    # Set default lunch break
+                    calendar_data[day]['lunch_out'] = "12:01"
+                    calendar_data[day]['lunch_in'] = "12:55"
+                else:
+                    # Logs in both morning and afternoon
+                    calendar_data[day]['arrival'] = morning_logs[0][0] if morning_logs else afternoon_logs[0][0]
+                    calendar_data[day]['departure'] = afternoon_logs[-1][0] if afternoon_logs else morning_logs[-1][0]
+                    # Set default lunch break
+                    calendar_data[day]['lunch_out'] = "12:01"
+                    calendar_data[day]['lunch_in'] = "12:55"
             
             # Calculate undertime (only for regular weekdays)
             if calendar_data[day]['special'] == '':
@@ -733,6 +819,7 @@ def generate_employee_dtr(writer, df, employee_name):
                     calendar_data[day]['lunch_out'],
                     calendar_data[day]['lunch_in']
                 )
+
     
     # Count Saturdays with logs
     saturday_count = sum(1 for i, data in calendar_data.items() 
